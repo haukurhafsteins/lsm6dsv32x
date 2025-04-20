@@ -46,7 +46,15 @@ stmdev_ctx_t dev_ctx = { 0 };
 
 static lsm6dsv32x_to_mg_t lsm6dsv32x_to_mg;
 static lsm6dsv32x_to_mdps_t lsm6dsv32x_to_mdps;
-static lsm6dsv32x_cfg_t cfg;
+static lsm6dsv32x_cfg_t cfg = {
+    .sampleRate = 120,
+    .accelRange = 4,
+    .gyroRange = 2000,
+    .batching = LSM6DSV32X_XL_BATCHED_AT_120Hz,
+    .fifoWatermark = 32,
+    .fifoMode = LSM6DSV32X_STREAM_MODE,
+    .timeout = 0
+ };
 static int max_elements_per_sample = 0;
 
 
