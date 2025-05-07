@@ -42,7 +42,6 @@ void lsm6dsv32x_init();
 void lsm6dsv32x_config(lsm6dsv32x_cfg_t *cfg);
 void lsm6dsv32x_start_sampling(bool start);
 void lsm6dsv32x_start_tapping(bool start);
-void lsm6dsv32x_reset();
 float lsm6dsv32x_get_timestamp_resolution(float sample_rate);
 int lsm6dsv32x_fifo_data_available();
 int lsm6dsv32x_read_fifo_element(fifo_element_t *fifo);

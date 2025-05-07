@@ -527,7 +527,7 @@ void lsm6dsv32x_start_tapping(bool start)
     lsm6dsv32x_pin_int2_route_set(&dev_ctx, &pin_int2);
 }
 
-void lsm6dsv32x_reset()
+static void lsm6dsv32x_reset()
 {
     lsm6dsv32x_reset_t rst;
 
