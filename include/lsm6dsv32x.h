@@ -47,6 +47,8 @@ int lsm6dsv32x_fifo_data_available();
 int lsm6dsv32x_read_fifo_element(fifo_element_t *fifo);
 void lsm6dsv32x_read_sources(lsm6dsv32x_sources_t *sources);
 void lsm6dsv32x_sleep();
+void lsm6dsv32x_set_debug(bool d);
+
 
 
 #ifdef __cplusplus

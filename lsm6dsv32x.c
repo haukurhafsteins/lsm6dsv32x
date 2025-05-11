@@ -6,43 +6,45 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "vectors.h"
 
-
-#define PRINT_FLOAT(name, value, period) \
-    {                                    \
-        static float last = 0;           \
+#define PRINT_FLOAT(name, value, period)         \
+    {                                            \
+        static float last = 0;                   \
         float now = esp_timer_get_time() * 1e-6; \
-        if (now - last > period)          \
-        {                                \
-            last = now;                  \
-            printf(name, value);          \
-        }                                \
+        if (now - last > period)                 \
+        {                                        \
+            last = now;                          \
+            printf(name, value);                 \
+        }                                        \
     }
 
 #define get_time_in_seconds() (esp_timer_get_time() * 1e-6)
 
-#define RUN_CODE_EVERY_START(period) \
-    {                                 \
-        static float last = 0;            \
+#define RUN_CODE_EVERY_START(period)       \
+    {                                      \
+        static float last = 0;             \
         float now = get_time_in_seconds(); \
-        if (now - last > period)          \
-        {                                 \
+        if (now - last > period)           \
+        {                                  \
             last = now;
 
-#define RUN_CODE_EVERY_END() }}
+#define RUN_CODE_EVERY_END() \
+    }                        \
+    }
 
 #define I2C_TIMEOUT -1
 #define TAG "LSM6DSV32X"
 
 // #define USE_GBIAS 1
 
-typedef float_t(*lsm6dsv32x_to_mg_t)(int16_t);
-typedef float_t(*lsm6dsv32x_to_mdps_t)(int16_t);
+typedef float_t (*lsm6dsv32x_to_mg_t)(int16_t);
+typedef float_t (*lsm6dsv32x_to_mdps_t)(int16_t);
 
 static i2c_master_dev_handle_t dev_handle_LSM6DSV32;
 
-stmdev_ctx_t dev_ctx = { 0 };
+stmdev_ctx_t dev_ctx = {0};
 
 static lsm6dsv32x_to_mg_t lsm6dsv32x_to_mg;
 static lsm6dsv32x_to_mdps_t lsm6dsv32x_to_mdps;
@@ -53,10 +55,9 @@ static lsm6dsv32x_cfg_t cfg = {
     .batching = LSM6DSV32X_XL_BATCHED_AT_120Hz,
     .fifoWatermark = 32,
     .fifoMode = LSM6DSV32X_STREAM_MODE,
-    .timeout = 0
- };
+    .timeout = 0};
 static int max_elements_per_sample = 0;
-
+static bool debug = false;
 
 static int acc_range_to_lsm6_range(uint8_t range)
 {
@@ -164,22 +165,27 @@ uint32_t lsm6dsv32x_from_f16_to_f32(uint16_t h)
     // Initialize a 32-bit floating point variable
     uint32_t result = 0;
 
-    if (exponent == 0) {
-        if (mantissa == 0) {
+    if (exponent == 0)
+    {
+        if (mantissa == 0)
+        {
             // Zero
             result = sign << 31; // Just keep the sign bit
         }
-        else {
+        else
+        {
             // Subnormal numbers
             float_t subnormal = (float_t)(mantissa) / (1 << 10);
-            result = ((uint32_t)sign << 31) | (*(uint32_t*)&subnormal);
+            result = ((uint32_t)sign << 31) | (*(uint32_t *)&subnormal);
         }
     }
-    else if (exponent == 31) {
+    else if (exponent == 31)
+    {
         // Infinite or NaN
         result = (sign << 31) | (0xFF << 23) | (mantissa << 13);
     }
-    else {
+    else
+    {
         // Normalized numbers
         uint32_t new_exp = exponent - 15 + 127; // Adjust the exponent
         result = (sign << 31) | (new_exp << 23) | (mantissa << 13);
@@ -190,7 +196,11 @@ uint32_t lsm6dsv32x_from_f16_to_f32(uint16_t h)
 
 static float_t npy_half_to_float(uint16_t h)
 {
-    union { float_t ret; uint32_t retbits; } conv;
+    union
+    {
+        float_t ret;
+        uint32_t retbits;
+    } conv;
     conv.retbits = lsm6dsv32x_from_f16_to_f32(h);
     return conv.ret;
 }
@@ -213,7 +223,7 @@ static void sflp2q(float_t quat[4], uint16_t sflp[3])
 }
 
 // Please note that is MANDATORY: return 0 -> no Error.
-static int32_t platform_write(void* handle, uint8_t reg, const uint8_t* bufp, uint16_t len)
+static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
 {
     uint8_t data_wr[4 + 1];
     data_wr[0] = reg;
@@ -228,7 +238,7 @@ static int32_t platform_write(void* handle, uint8_t reg, const uint8_t* bufp, ui
     return 0;
 }
 
-static int32_t platform_read(void* handle, uint8_t reg, uint8_t* bufp, uint16_t len)
+static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
 {
     esp_err_t err = i2c_master_transmit_receive(dev_handle_LSM6DSV32, &reg, 1, bufp, len, I2C_TIMEOUT);
     if (err != ESP_OK)
@@ -239,7 +249,7 @@ static int32_t platform_read(void* handle, uint8_t reg, uint8_t* bufp, uint16_t 
     return 0;
 }
 
-// Optional (may be required by driver) 
+// Optional (may be required by driver)
 static void platform_delay(uint32_t millisec)
 {
     vTaskDelay(millisec / portTICK_PERIOD_MS);
@@ -268,7 +278,7 @@ static void setup_fifo()
     max_elements_per_sample++;
     lsm6dsv32x_fifo_timestamp_batch_set(&dev_ctx, LSM6DSV32X_TMSTMP_DEC_1);
     max_elements_per_sample++;
-    lsm6dsv32x_fifo_sflp_raw_t fifo_sflp = { 0 };
+    lsm6dsv32x_fifo_sflp_raw_t fifo_sflp = {0};
     fifo_sflp.game_rotation = 1;
     max_elements_per_sample++;
     fifo_sflp.gravity = 1;
@@ -277,7 +287,7 @@ static void setup_fifo()
     fifo_sflp.gbias = 1;
     max_elements_per_sample++;
 #endif
-    lsm6dsv32x_fifo_sflp_batch_set(&dev_ctx, fifo_sflp);    // Quaternion
+    lsm6dsv32x_fifo_sflp_batch_set(&dev_ctx, fifo_sflp); // Quaternion
     lsm6dsv32x_fifo_mode_set(&dev_ctx, cfg.fifoMode);
 }
 
@@ -285,14 +295,13 @@ static void clear_fifo()
 {
     lsm6dsv32x_fifo_mode_set(&dev_ctx, LSM6DSV32X_BYPASS_MODE);
     lsm6dsv32x_fifo_mode_set(&dev_ctx, LSM6DSV32X_STREAM_MODE);
-
 }
 static void setup_tapping()
 {
-    lsm6dsv32x_interrupt_mode_t irq = { 0 };
-    lsm6dsv32x_tap_detection_t tap = { 0 };
-    lsm6dsv32x_tap_thresholds_t tap_ths = { 0 };
-    lsm6dsv32x_tap_time_windows_t tap_win = { 0 };
+    lsm6dsv32x_interrupt_mode_t irq = {0};
+    lsm6dsv32x_tap_detection_t tap = {0};
+    lsm6dsv32x_tap_thresholds_t tap_ths = {0};
+    lsm6dsv32x_tap_time_windows_t tap_win = {0};
     irq.enable = 1;
     irq.lir = 0;
     lsm6dsv32x_interrupt_enable_set(&dev_ctx, irq);
@@ -311,7 +320,6 @@ static void setup_tapping()
     lsm6dsv32x_tap_axis_priority_set(&dev_ctx, LSM6DSV32X_XZY);
 
     lsm6dsv32x_tap_mode_set(&dev_ctx, LSM6DSV32X_BOTH_SINGLE_DOUBLE);
-
 }
 
 static void setup_filter()
@@ -330,39 +338,44 @@ static void setup_filter()
     // lsm6dsv32x_filt_sixd_feed_set(&dev_ctx, PROPERTY_DISABLE);
 
     // lsm6dsv32x_filt_gy_eis_lp_bandwidth_set(&dev_ctx, LSM6DSV32X_EIS_LP_NORMAL);
-
-
 }
-void lsm6dsv32x_read_sources(lsm6dsv32x_sources_t* sources)
+void lsm6dsv32x_read_sources(lsm6dsv32x_sources_t *sources)
 {
     lsm6dsv32x_all_sources_t status;
     lsm6dsv32x_all_sources_get(&dev_ctx, &status);
 
-    if (status.single_tap) {
+    if (status.single_tap)
+    {
         sources->tap_single = true;
-        //printf("Single tap detected, sign %d, x %d, y %d, z %d\n", status.tap_sign, status.tap_x, status.tap_y, status.tap_z);
+        // printf("Single tap detected, sign %d, x %d, y %d, z %d\n", status.tap_sign, status.tap_x, status.tap_y, status.tap_z);
     }
-    if (status.double_tap) {
+    if (status.double_tap)
+    {
         sources->tap_double = true;
-        //printf("Double tap detected, sign %d, x %d, y %d, z %d\n", status.tap_sign, status.tap_x, status.tap_y, status.tap_z);
+        // printf("Double tap detected, sign %d, x %d, y %d, z %d\n", status.tap_sign, status.tap_x, status.tap_y, status.tap_z);
     }
-    if (status.tap_x) {
+    if (status.tap_x)
+    {
         sources->tap_x = true;
-        //printf("Tap on X\n");
+        // printf("Tap on X\n");
     }
-    if (status.tap_y) {
+    if (status.tap_y)
+    {
         sources->tap_y = true;
-        //printf("Tap on Y\n");
+        // printf("Tap on Y\n");
     }
-    if (status.tap_z) {
+    if (status.tap_z)
+    {
         sources->tap_z = true;
-        //printf("Tap on Z\n");
+        // printf("Tap on Z\n");
     }
-    if (status.sleep_change) {
+    if (status.sleep_change)
+    {
         sources->sleep_change = true;
         printf("Sleep change\n");
     }
-    if (status.drdy_ah_qvar) {
+    if (status.drdy_ah_qvar)
+    {
         printf("QVAR ready\n");
     }
     sources->tap_sign = status.tap_sign;
@@ -378,7 +391,8 @@ int lsm6dsv32x_fifo_data_available()
         ESP_LOGE(TAG, "FIFO status read error");
         return -1;
     }
-    if (fifo_status.fifo_ovr == 1) {
+    if (fifo_status.fifo_ovr == 1)
+    {
         ESP_LOGE(TAG, "FIFO overrun");
         clear_fifo();
         return -1;
@@ -386,14 +400,14 @@ int lsm6dsv32x_fifo_data_available()
     return fifo_status.fifo_level;
 }
 
-int lsm6dsv32x_read_fifo_element(fifo_element_t* el)
+int lsm6dsv32x_read_fifo_element(fifo_element_t *el)
 {
     float_t quat[4];
-    int16_t* axis;
-    int16_t* datax;
-    int16_t* datay;
-    int16_t* dataz;
-    int32_t* ts;
+    int16_t *axis;
+    int16_t *datax;
+    int16_t *datay;
+    int16_t *dataz;
+    int32_t *ts;
     int32_t timestamp = 0;
 
     // IMPORTANT BEGIN
@@ -402,9 +416,10 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t* el)
     int elements_per_sample = 0;
     // IMPORTANT END
 
-    //static int samples_per_sec = 0;
+    // static int samples_per_sec = 0;
 
-    while (elements_per_sample != max_elements_per_sample) {
+    while (elements_per_sample != max_elements_per_sample)
+    {
         lsm6dsv32x_fifo_out_raw_t f_data;
 
         if (-1 == lsm6dsv32x_fifo_out_raw_get(&dev_ctx, &f_data))
@@ -416,12 +431,13 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t* el)
         if (f_data.tag == LSM6DSV32X_FIFO_EMPTY)
             return 0;
 
-        datax = (int16_t*)&f_data.data[0];
-        datay = (int16_t*)&f_data.data[2];
-        dataz = (int16_t*)&f_data.data[4];
-        ts = (int32_t*)&f_data.data[0];
+        datax = (int16_t *)&f_data.data[0];
+        datay = (int16_t *)&f_data.data[2];
+        dataz = (int16_t *)&f_data.data[4];
+        ts = (int32_t *)&f_data.data[0];
 
-        switch (f_data.tag) {
+        switch (f_data.tag)
+        {
         case LSM6DSV32X_XL_NC_TAG:
             el->acc.x = lsm6dsv32x_to_mg(*datax) * 0.001;
             el->acc.y = lsm6dsv32x_to_mg(*datay) * 0.001;
@@ -441,7 +457,7 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t* el)
             break;
 #ifdef USE_GBIAS
         case LSM6DSV32X_SFLP_GYROSCOPE_BIAS_TAG:
-            axis = (int16_t*)&f_data.data[0];
+            axis = (int16_t *)&f_data.data[0];
             el->gbias.x = lsm6dsv32x_from_fs125_to_mdps(axis[0]);
             el->gbias.y = lsm6dsv32x_from_fs125_to_mdps(axis[1]);
             el->gbias.z = lsm6dsv32x_from_fs125_to_mdps(axis[2]);
@@ -449,14 +465,14 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t* el)
             break;
 #endif
         case LSM6DSV32X_SFLP_GRAVITY_VECTOR_TAG:
-            axis = (int16_t*)&f_data.data[0];
+            axis = (int16_t *)&f_data.data[0];
             el->gravity.x = lsm6dsv32x_from_sflp_to_mg(axis[0]) * 0.001;
             el->gravity.y = lsm6dsv32x_from_sflp_to_mg(axis[1]) * 0.001;
             el->gravity.z = lsm6dsv32x_from_sflp_to_mg(axis[2]) * 0.001;
             elements_per_sample++;
             break;
         case LSM6DSV32X_SFLP_GAME_ROTATION_VECTOR_TAG:
-            sflp2q(quat, (uint16_t*)&f_data.data[0]);
+            sflp2q(quat, (uint16_t *)&f_data.data[0]);
             el->q.w = quat[3];
             el->q.x = quat[0];
             el->q.y = quat[1];
@@ -515,15 +531,15 @@ void lsm6dsv32x_start_sampling(bool start)
 
 void lsm6dsv32x_start_tapping(bool start)
 {
-    //printf("##### LSM6DSV32X start tapping, %d #####\n", start);
-    //setup_sampling_rate();
+    // printf("##### LSM6DSV32X start tapping, %d #####\n", start);
+    // setup_sampling_rate();
     if (start)
         setup_tapping();
     uint8_t property_enable = start ? PROPERTY_ENABLE : PROPERTY_DISABLE;
-    lsm6dsv32x_pin_int_route_t pin_int2 = { 0 };
+    lsm6dsv32x_pin_int_route_t pin_int2 = {0};
     pin_int2.double_tap = property_enable;
     pin_int2.single_tap = property_enable;
-    //pin_int2.sleep_change = property_enable;
+    // pin_int2.sleep_change = property_enable;
     lsm6dsv32x_pin_int2_route_set(&dev_ctx, &pin_int2);
 }
 
@@ -537,7 +553,8 @@ static void lsm6dsv32x_reset()
     int rst_cnt = 0;
     const int sleep_time = 5000;
     int total_sleep_time = 0;
-    do {
+    do
+    {
         usleep(sleep_time);
         lsm6dsv32x_reset_get(&dev_ctx, &rst);
         rst_cnt++;
@@ -547,13 +564,30 @@ static void lsm6dsv32x_reset()
         ESP_LOGE(TAG, "LSM6DSV32X reset failed\n");
 }
 
-void lsm6dsv32x_config(lsm6dsv32x_cfg_t* newCfg)
+void lsm6dsv32x_config(lsm6dsv32x_cfg_t *newCfg)
 {
     cfg = *newCfg;
+    if (debug)
+    {
+        // printf("##### LSM6DSV32X config #####\n");
+        printf("LSM6DSV32X config:\n");
+        printf("  sample rate: %d\n", cfg.sampleRate);
+        printf("  accel range: %d\n", cfg.accelRange);
+        printf("  gyro range: %d\n", cfg.gyroRange);
+        printf("  batching: %d\n", cfg.batching);
+        printf("  fifo watermark: %d\n", cfg.fifoWatermark);
+        printf("  fifo mode: %d\n", cfg.fifoMode);
+        printf("  timeout: %d\n", cfg.timeout);
+    }
     lsm6dsv32x_reset();
     setup_sampling_rate();
     setup_fifo();
     // setup_filter();
+}
+
+void lsm6dsv32x_set_debug(bool d)
+{
+    debug = d;
 }
 
 void lsm6dsv32x_init()
