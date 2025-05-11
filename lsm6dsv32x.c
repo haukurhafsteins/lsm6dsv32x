@@ -484,6 +484,17 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t *el)
             break;
         }
     }
+    if (debug)
+    {
+        RUN_CODE_EVERY_START(1.0);
+        printf("%.2f: FIFO acc: %.3f %.3f %.3f, gyro: %.3f %.3f %.3f, gravity: %.3f %.3f %.3f, q: %.3f %.3f %.3f %.3f\n",
+               el->timestamp,
+               el->acc.x, el->acc.y, el->acc.z,
+               el->gyro.x, el->gyro.y, el->gyro.z,
+               el->gravity.x, el->gravity.y, el->gravity.z,
+               el->q.w, el->q.x, el->q.y, el->q.z);
+        RUN_CODE_EVERY_END();
+    }
     // static int batches_per_sec = 0;
     // batches_per_sec++;
     // RUN_CODE_EVERY_START(1.0)
