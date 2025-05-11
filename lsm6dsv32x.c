@@ -577,7 +577,7 @@ void lsm6dsv32x_config(lsm6dsv32x_cfg_t *newCfg)
         printf("  batching: %d\n", cfg.batching);
         printf("  fifo watermark: %d\n", cfg.fifoWatermark);
         printf("  fifo mode: %d\n", cfg.fifoMode);
-        printf("  timeout: %d\n", cfg.timeout);
+        printf("  timeout: %ld\n", cfg.timeout);
     }
     lsm6dsv32x_reset();
     setup_sampling_rate();
