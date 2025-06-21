@@ -526,7 +526,7 @@ void lsm6dsv32x_init_i2c(i2c_master_dev_handle_t dev_handle)
 
 void lsm6dsv32x_start_sampling(bool start)
 {
-    printf("##### LSM6DSV32X start sampling, %d #####\n", start);
+    printf("##### LSM6DSV32X %s sampling #####\n", start ? "start" : "stop");
 
     if (start)
     {
