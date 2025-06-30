@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include "driver/i2c_master.h"
+#include "driver/spi_master.h"
 #include "vectors.h"
 
 #ifdef __cplusplus
@@ -38,6 +39,7 @@ typedef struct {
 } fifo_element_t;
 
 void lsm6dsv32x_init_i2c(i2c_master_dev_handle_t dev_handle);
+void lsm6dsv32x_init_spi(spi_device_handle_t *dev_handle);
 void lsm6dsv32x_init();
 void lsm6dsv32x_config(lsm6dsv32x_cfg_t *cfg);
 void lsm6dsv32x_start_sampling(bool start);

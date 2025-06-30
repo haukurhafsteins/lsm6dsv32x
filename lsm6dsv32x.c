@@ -2,12 +2,14 @@
 #include <unistd.h>
 #include "lsm6dsv32x.h"
 #include "lsm6dsv32x_reg.h"
-#include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "vectors.h"
+
+// #define USE_I2C 0
+#define USE_SPI 1
 
 #define PRINT_FLOAT(name, value, period)         \
     {                                            \
@@ -34,15 +36,12 @@
     }                        \
     }
 
-#define I2C_TIMEOUT -1
 #define TAG "LSM6DSV32X"
 
 // #define USE_GBIAS 1
 
 typedef float_t (*lsm6dsv32x_to_mg_t)(int16_t);
 typedef float_t (*lsm6dsv32x_to_mdps_t)(int16_t);
-
-static i2c_master_dev_handle_t dev_handle_LSM6DSV32;
 
 stmdev_ctx_t dev_ctx = {0};
 
@@ -223,6 +222,10 @@ static void sflp2q(float_t quat[4], uint16_t sflp[3])
 }
 
 // Please note that is MANDATORY: return 0 -> no Error.
+#if defined(USE_I2C)
+#define I2C_TIMEOUT -1
+static i2c_master_dev_handle_t dev_handle_LSM6DSV32;
+
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
 {
     uint8_t data_wr[4 + 1];
@@ -248,6 +251,33 @@ static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t 
     }
     return 0;
 }
+#elif defined(USE_SPI)
+extern spi_device_handle_t the_dev_handle;
+static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
+{
+    spi_transaction_t t = {};
+    t.addr = reg;
+    t.length = (len) * 8;
+    t.tx_buffer = bufp;
+
+    esp_err_t err = spi_device_polling_transmit(the_dev_handle, &t);
+    if (err == ESP_OK)
+        return 0;
+    return -1;
+}
+static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
+{
+    spi_transaction_t t = {};
+    t.addr = reg;
+    t.length = (len) * 8;
+    t.rx_buffer = bufp;
+
+    esp_err_t err = spi_device_polling_transmit(the_dev_handle, &t);
+    if (err == ESP_OK)
+        return 0;
+    return -1;
+}
+#endif
 
 // Optional (may be required by driver)
 static void platform_delay(uint32_t millisec)
@@ -518,11 +548,17 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t *el)
 //     }
 //     return 7680.0 * (1 + 0.0013 * (float)freq_fine) / sampling_rate_to_odrcoeff(sample_rate);
 // }
-
+#if defined(USE_I2C)
 void lsm6dsv32x_init_i2c(i2c_master_dev_handle_t dev_handle)
 {
     dev_handle_LSM6DSV32 = dev_handle;
 }
+#elif defined(USE_SPI)
+void lsm6dsv32x_init_spi(spi_device_handle_t *dev_handle)
+{
+   // spi_handle = *dev_handle;
+}
+#endif
 
 void lsm6dsv32x_start_sampling(bool start)
 {
@@ -606,8 +642,11 @@ void lsm6dsv32x_init()
     dev_ctx.write_reg = platform_write;
     dev_ctx.read_reg = platform_read;
     dev_ctx.mdelay = platform_delay;
+#if defined(USE_I2C)
     dev_ctx.handle = &dev_handle_LSM6DSV32;
-
+#elif defined(USE_SPI)
+    dev_ctx.handle = NULL;
+#endif
     uint8_t whoamI = 0;
     if (-1 == lsm6dsv32x_device_id_get(&dev_ctx, &whoamI))
         ESP_LOGE(TAG, "Who am I get failed\n");
