@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include "lsm6dsv32x.h"
 #include "lsm6dsv32x_reg.h"
@@ -255,27 +256,39 @@ static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t 
 extern spi_device_handle_t the_dev_handle;
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
 {
-    spi_transaction_t t = {};
-    t.addr = reg;
-    t.length = (len) * 8;
-    t.tx_buffer = bufp;
+    uint8_t tx_buf[1 + len];
+    tx_buf[0] = reg & 0x7F;  // Write command
+    memcpy(&tx_buf[1], bufp, len);
 
-    esp_err_t err = spi_device_polling_transmit(the_dev_handle, &t);
-    if (err == ESP_OK)
-        return 0;
-    return -1;
+    spi_transaction_t t = {
+        .length = (1 + len) * 8,
+        .tx_buffer = tx_buf,
+        .rx_buffer = NULL,
+    };
+
+    return (spi_device_polling_transmit(the_dev_handle, &t) == ESP_OK) ? 0 : -1;
 }
+
 static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
 {
-    spi_transaction_t t = {};
-    t.addr = reg;
-    t.length = (len) * 8;
-    t.rx_buffer = bufp;
+    uint8_t tx_buf[1 + len];
+    uint8_t rx_buf[1 + len];  // First byte will be dummy
+
+    tx_buf[0] = reg | 0x80;  // Read command
+    memset(&tx_buf[1], 0xFF, len);  // Dummy bytes
+
+    spi_transaction_t t = {
+        .length = (1 + len) * 8,
+        .tx_buffer = tx_buf,
+        .rx_buffer = rx_buf,
+    };
 
     esp_err_t err = spi_device_polling_transmit(the_dev_handle, &t);
-    if (err == ESP_OK)
-        return 0;
-    return -1;
+    if (err != ESP_OK)
+        return -1;
+
+    memcpy(bufp, &rx_buf[1], len);  // Skip dummy byte
+    return 0;
 }
 #endif
 
