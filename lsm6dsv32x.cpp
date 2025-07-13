@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "lsm6dsv32x.h"
-#include "lsm6dsv32x_reg.h"
 #include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -44,7 +43,7 @@ typedef float_t (*lsm6dsv32x_to_mdps_t)(int16_t);
 
 static i2c_master_dev_handle_t dev_handle_LSM6DSV32;
 
-stmdev_ctx_t dev_ctx = {0};
+stmdev_ctx_t dev_ctx = {};
 
 static lsm6dsv32x_to_mg_t lsm6dsv32x_to_mg;
 static lsm6dsv32x_to_mdps_t lsm6dsv32x_to_mdps;
@@ -59,7 +58,7 @@ static lsm6dsv32x_cfg_t cfg = {
 static int max_elements_per_sample = 0;
 static bool debug = false;
 
-static int acc_range_to_lsm6_range(uint8_t range)
+static lsm6dsv32x_xl_full_scale_t acc_range_to_lsm6_range(uint8_t range)
 {
     switch (range)
     {
@@ -79,7 +78,7 @@ static int acc_range_to_lsm6_range(uint8_t range)
     }
 }
 
-static int gyro_range_to_lsm6_range(uint16_t range)
+static lsm6dsv32x_gy_full_scale_t gyro_range_to_lsm6_range(uint16_t range)
 {
     switch (range)
     {
@@ -105,7 +104,7 @@ static int gyro_range_to_lsm6_range(uint16_t range)
     }
 }
 
-static int sampling_rate_to_lsm6_rate(uint16_t rate)
+static lsm6dsv32x_data_rate_t sampling_rate_to_lsm6_rate(uint16_t rate)
 {
     switch (rate)
     {
@@ -263,7 +262,7 @@ static void setup_sampling_rate()
 
     lsm6dsv32x_xl_data_rate_set(&dev_ctx, sampling_rate_to_lsm6_rate(cfg.sampleRate));
     lsm6dsv32x_gy_data_rate_set(&dev_ctx, sampling_rate_to_lsm6_rate(cfg.sampleRate));
-    lsm6dsv32x_sflp_data_rate_set(&dev_ctx, sampling_rate_to_lsm6_rate(cfg.sampleRate));
+    lsm6dsv32x_sflp_data_rate_set(&dev_ctx, (lsm6dsv32x_sflp_data_rate_t)sampling_rate_to_lsm6_rate(cfg.sampleRate));
     lsm6dsv32x_timestamp_set(&dev_ctx, PROPERTY_ENABLE);
     lsm6dsv32x_sflp_game_rotation_set(&dev_ctx, PROPERTY_ENABLE);
 }
@@ -274,7 +273,7 @@ static void setup_fifo()
     lsm6dsv32x_fifo_watermark_set(&dev_ctx, cfg.fifoWatermark);
     lsm6dsv32x_fifo_xl_batch_set(&dev_ctx, cfg.batching);
     max_elements_per_sample = 1;
-    lsm6dsv32x_fifo_gy_batch_set(&dev_ctx, cfg.batching);
+    lsm6dsv32x_fifo_gy_batch_set(&dev_ctx, (lsm6dsv32x_fifo_gy_batch_t)cfg.batching);
     max_elements_per_sample++;
     lsm6dsv32x_fifo_timestamp_batch_set(&dev_ctx, LSM6DSV32X_TMSTMP_DEC_1);
     max_elements_per_sample++;
@@ -287,7 +286,7 @@ static void setup_fifo()
     fifo_sflp.gbias = 1;
     max_elements_per_sample++;
 #endif
-    lsm6dsv32x_fifo_sflp_batch_set(&dev_ctx, fifo_sflp); // Quaternion
+    lsm6dsv32x_fifo_sflp_batch_set(&dev_ctx, fifo_sflp);
     lsm6dsv32x_fifo_mode_set(&dev_ctx, cfg.fifoMode);
 }
 
@@ -428,7 +427,7 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t *el)
             return -1;
         }
 
-        if (f_data.tag == LSM6DSV32X_FIFO_EMPTY)
+        if (f_data.tag == 0/*LSM6DSV32X_FIFO_EMPTY*/)
             return 0;
 
         datax = (int16_t *)&f_data.data[0];
@@ -438,19 +437,19 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t *el)
 
         switch (f_data.tag)
         {
-        case LSM6DSV32X_XL_NC_TAG:
+        case 0x2/*LSM6DSV32X_XL_NC_TAG*/:
             el->acc.x = lsm6dsv32x_to_mg(*datax) * 0.001;
             el->acc.y = lsm6dsv32x_to_mg(*datay) * 0.001;
             el->acc.z = lsm6dsv32x_to_mg(*dataz) * 0.001;
             elements_per_sample++;
             break;
-        case LSM6DSV32X_GY_NC_TAG:
+        case 0x1/*LSM6DSV32X_GY_NC_TAG*/:
             el->gyro.x = lsm6dsv32x_to_mdps(*datax) * 0.001;
             el->gyro.y = lsm6dsv32x_to_mdps(*datay) * 0.001;
             el->gyro.z = lsm6dsv32x_to_mdps(*dataz) * 0.001;
             elements_per_sample++;
             break;
-        case LSM6DSV32X_TIMESTAMP_TAG:
+        case 0x4/*LSM6DSV32X_TIMESTAMP_TAG*/:
             timestamp = *ts;
             el->timestamp = timestamp * 0.00002175;
             elements_per_sample++;
@@ -464,14 +463,14 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t *el)
             elements_per_sample++;
             break;
 #endif
-        case LSM6DSV32X_SFLP_GRAVITY_VECTOR_TAG:
+        case 0x17/*LSM6DSV32X_SFLP_GRAVITY_VECTOR_TAG*/:
             axis = (int16_t *)&f_data.data[0];
             el->gravity.x = lsm6dsv32x_from_sflp_to_mg(axis[0]) * 0.001;
             el->gravity.y = lsm6dsv32x_from_sflp_to_mg(axis[1]) * 0.001;
             el->gravity.z = lsm6dsv32x_from_sflp_to_mg(axis[2]) * 0.001;
             elements_per_sample++;
             break;
-        case LSM6DSV32X_SFLP_GAME_ROTATION_VECTOR_TAG:
+        case 0x13/*LSM6DSV32X_SFLP_GAME_ROTATION_VECTOR_TAG*/:
             sflp2q(quat, (uint16_t *)&f_data.data[0]);
             el->q.w = quat[3];
             el->q.x = quat[0];
@@ -558,7 +557,7 @@ static void lsm6dsv32x_reset()
 {
     lsm6dsv32x_reset_t rst;
 
-    if (-1 == lsm6dsv32x_reset_set(&dev_ctx, LSM6DSV32X_RESTORE_CTRL_REGS | LSM6DSV32X_GLOBAL_RST))
+    if (-1 == lsm6dsv32x_reset_set(&dev_ctx, (lsm6dsv32x_reset_t)(LSM6DSV32X_RESTORE_CTRL_REGS | LSM6DSV32X_GLOBAL_RST)))
         ESP_LOGE(TAG, "LSM6DSV32X reset failed\n");
 
     int rst_cnt = 0;
