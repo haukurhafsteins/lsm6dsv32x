@@ -30,7 +30,7 @@ typedef struct {
     vector3_t acc;
     vector3_t gyro;
     vector3_t gravity;
-    Quaternion q;
+    Quaternion<float> q;
     float timestamp;
 } fifo_element_t;
 
