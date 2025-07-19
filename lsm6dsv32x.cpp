@@ -6,11 +6,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_log_internal.h"
 #include "esp_timer.h"
 #include "vectors.h"
-
-// #define USE_I2C 0
-#define USE_SPI 1
 
 #define PRINT_FLOAT(name, value, period)         \
     {                                            \
@@ -44,7 +42,7 @@
 typedef float_t (*lsm6dsv32x_to_mg_t)(int16_t);
 typedef float_t (*lsm6dsv32x_to_mdps_t)(int16_t);
 
-static i2c_master_dev_handle_t dev_handle_LSM6DSV32;
+static spi_device_handle_t dev_handle_LSM6DSV32;
 
 stmdev_ctx_t dev_ctx = {};
 
@@ -224,51 +222,19 @@ static void sflp2q(float_t quat[4], uint16_t sflp[3])
     quat[3] = sqrtf(1.0f - sumsq);
 }
 
-// Please note that is MANDATORY: return 0 -> no Error.
-#if defined(USE_I2C)
-#define I2C_TIMEOUT -1
-static i2c_master_dev_handle_t dev_handle_LSM6DSV32;
 
-static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
-{
-    uint8_t data_wr[4 + 1];
-    data_wr[0] = reg;
-    for (int i = 0; i < len; i++)
-        data_wr[i + 1] = bufp[i];
-    esp_err_t err = i2c_master_transmit(dev_handle_LSM6DSV32, data_wr, len + 1, I2C_TIMEOUT);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "I2C write error to reg %02X, %s\n", reg, esp_err_to_name(err));
-        return -1;
-    }
-    return 0;
-}
-
-static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
-{
-    esp_err_t err = i2c_master_transmit_receive(dev_handle_LSM6DSV32, &reg, 1, bufp, len, I2C_TIMEOUT);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "I2C read error from reg %02X, %s\n", reg, esp_err_to_name(err));
-        return -1;
-    }
-    return 0;
-}
-#elif defined(USE_SPI)
-extern spi_device_handle_t the_dev_handle;
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
 {
     uint8_t tx_buf[1 + len];
     tx_buf[0] = reg & 0x7F;  // Write command
     memcpy(&tx_buf[1], bufp, len);
 
-    spi_transaction_t t = {
-        .length = (1 + len) * 8,
-        .tx_buffer = tx_buf,
-        .rx_buffer = NULL,
-    };
+    spi_transaction_t t = {};
+    t.length = (1 + len) * 8;
+    t.tx_buffer = tx_buf;
+    t.rx_buffer = NULL;
 
-    return (spi_device_polling_transmit(the_dev_handle, &t) == ESP_OK) ? 0 : -1;
+    return (spi_device_polling_transmit(dev_handle_LSM6DSV32, &t) == ESP_OK) ? 0 : -1;
 }
 
 static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
@@ -279,20 +245,18 @@ static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t 
     tx_buf[0] = reg | 0x80;  // Read command
     memset(&tx_buf[1], 0xFF, len);  // Dummy bytes
 
-    spi_transaction_t t = {
-        .length = (1 + len) * 8,
-        .tx_buffer = tx_buf,
-        .rx_buffer = rx_buf,
-    };
+    spi_transaction_t t = {};
+    t.length = (1 + len) * 8;
+    t.tx_buffer = tx_buf;
+    t.rx_buffer = rx_buf;
 
-    esp_err_t err = spi_device_polling_transmit(the_dev_handle, &t);
+    esp_err_t err = spi_device_polling_transmit(dev_handle_LSM6DSV32, &t);
     if (err != ESP_OK)
         return -1;
 
     memcpy(bufp, &rx_buf[1], len);  // Skip dummy byte
     return 0;
 }
-#endif
 
 // Optional (may be required by driver)
 static void platform_delay(uint32_t millisec)
@@ -323,7 +287,7 @@ static void setup_fifo()
     max_elements_per_sample++;
     lsm6dsv32x_fifo_timestamp_batch_set(&dev_ctx, LSM6DSV32X_TMSTMP_DEC_1);
     max_elements_per_sample++;
-    lsm6dsv32x_fifo_sflp_raw_t fifo_sflp = {0};
+    lsm6dsv32x_fifo_sflp_raw_t fifo_sflp = {};
     fifo_sflp.game_rotation = 1;
     max_elements_per_sample++;
     fifo_sflp.gravity = 1;
@@ -343,10 +307,10 @@ static void clear_fifo()
 }
 static void setup_tapping()
 {
-    lsm6dsv32x_interrupt_mode_t irq = {0};
-    lsm6dsv32x_tap_detection_t tap = {0};
-    lsm6dsv32x_tap_thresholds_t tap_ths = {0};
-    lsm6dsv32x_tap_time_windows_t tap_win = {0};
+    lsm6dsv32x_interrupt_mode_t irq = {};
+    lsm6dsv32x_tap_detection_t tap = {};
+    lsm6dsv32x_tap_thresholds_t tap_ths = {};
+    lsm6dsv32x_tap_time_windows_t tap_win = {};
     irq.enable = 1;
     irq.lir = 0;
     lsm6dsv32x_interrupt_enable_set(&dev_ctx, irq);
@@ -563,17 +527,10 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t *el)
 //     }
 //     return 7680.0 * (1 + 0.0013 * (float)freq_fine) / sampling_rate_to_odrcoeff(sample_rate);
 // }
-#if defined(USE_I2C)
-void lsm6dsv32x_init_i2c(i2c_master_dev_handle_t dev_handle)
-{
-    dev_handle_LSM6DSV32 = dev_handle;
-}
-#elif defined(USE_SPI)
 void lsm6dsv32x_init_spi(spi_device_handle_t *dev_handle)
 {
-   // spi_handle = *dev_handle;
+   spi_handle = *dev_handle;
 }
-#endif
 
 void lsm6dsv32x_start_sampling(bool start)
 {
@@ -657,11 +614,7 @@ void lsm6dsv32x_init()
     dev_ctx.write_reg = platform_write;
     dev_ctx.read_reg = platform_read;
     dev_ctx.mdelay = platform_delay;
-#if defined(USE_I2C)
     dev_ctx.handle = &dev_handle_LSM6DSV32;
-#elif defined(USE_SPI)
-    dev_ctx.handle = NULL;
-#endif
     uint8_t whoamI = 0;
     if (-1 == lsm6dsv32x_device_id_get(&dev_ctx, &whoamI))
         ESP_LOGE(TAG, "Who am I get failed\n");
