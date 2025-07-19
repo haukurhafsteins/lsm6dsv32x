@@ -529,7 +529,7 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t *el)
 // }
 void lsm6dsv32x_init_spi(spi_device_handle_t *dev_handle)
 {
-   spi_handle = *dev_handle;
+   dev_handle_LSM6DSV32 = *dev_handle;
 }
 
 void lsm6dsv32x_start_sampling(bool start)
