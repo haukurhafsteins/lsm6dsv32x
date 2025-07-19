@@ -4,10 +4,7 @@
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "vectors.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "Quaternion.hpp"
 #include "lsm6dsv32x_reg.h"
 
 typedef struct {
@@ -34,7 +31,7 @@ typedef struct {
     vector3_t acc;
     vector3_t gyro;
     vector3_t gravity;
-    quaternion_t q;
+    Quaternion<float> q;
     float timestamp;
 } fifo_element_t;
 
@@ -50,9 +47,3 @@ int lsm6dsv32x_read_fifo_element(fifo_element_t *fifo);
 void lsm6dsv32x_read_sources(lsm6dsv32x_sources_t *sources);
 void lsm6dsv32x_sleep();
 void lsm6dsv32x_set_debug(bool d);
-
-
-
-#ifdef __cplusplus
-}
-#endif
