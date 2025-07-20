@@ -5,17 +5,17 @@
 #include "driver/spi_master.h"
 #include "vectors.h"
 #include "Quaternion.hpp"
-#include "lsm6dsv32x_reg.h"
+#include "lsm6dsv80x_reg.h"
 
 typedef struct {
     uint16_t sampleRate;
     uint8_t accelRange;
     uint16_t gyroRange;
-    lsm6dsv32x_fifo_xl_batch_t batching;
+    lsm6dsv80x_fifo_xl_batch_t batching;
     uint16_t fifoWatermark;
-    lsm6dsv32x_fifo_mode_t fifoMode;
+    lsm6dsv80x_fifo_mode_t fifoMode;
     uint32_t timeout;
-} lsm6dsv32x_cfg_t;
+} lsm6dsv80x_cfg_t;
 
 typedef struct {
     bool tap_x;
@@ -25,7 +25,7 @@ typedef struct {
     bool tap_double;
     bool tap_sign;
     bool sleep_change;
-} lsm6dsv32x_sources_t;
+} lsm6dsv80x_sources_t;
 
 typedef struct {
     vector3_t acc;
@@ -35,14 +35,14 @@ typedef struct {
     float timestamp;
 } fifo_element_t;
 
-void lsm6dsv32x_init_spi(spi_device_handle_t *dev_handle);
-void lsm6dsv32x_init();
-void lsm6dsv32x_config(lsm6dsv32x_cfg_t *cfg);
-void lsm6dsv32x_start_sampling(bool start);
-void lsm6dsv32x_start_tapping(bool start);
-float lsm6dsv32x_get_timestamp_resolution(float sample_rate);
-int lsm6dsv32x_fifo_data_available();
-int lsm6dsv32x_read_fifo_element(fifo_element_t *fifo);
-void lsm6dsv32x_read_sources(lsm6dsv32x_sources_t *sources);
-void lsm6dsv32x_sleep();
-void lsm6dsv32x_set_debug(bool d);
+void lsm6dsv80x_init_spi(spi_device_handle_t *dev_handle);
+void lsm6dsv80x_init();
+void lsm6dsv80x_config(lsm6dsv80x_cfg_t *cfg);
+void lsm6dsv80x_start_sampling(bool start);
+void lsm6dsv80x_start_tapping(bool start);
+float lsm6dsv80x_get_timestamp_resolution(float sample_rate);
+int lsm6dsv80x_fifo_data_available();
+int lsm6dsv80x_read_fifo_element(fifo_element_t *fifo);
+void lsm6dsv80x_read_sources(lsm6dsv80x_sources_t *sources);
+void lsm6dsv80x_sleep();
+void lsm6dsv80x_set_debug(bool d);
