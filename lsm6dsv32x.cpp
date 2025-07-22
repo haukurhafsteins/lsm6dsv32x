@@ -149,45 +149,6 @@ static int sampling_rate_to_odrcoeff(uint16_t rate)
     }
 }
 
-// uint32_t lsm6dsv80x_from_f16_to_f32(uint16_t h)
-// {
-//     // Extract the sign, exponent, and mantissa from the 16-bit input
-//     uint16_t sign = (h >> 15) & 0x1;
-//     uint16_t exponent = (h >> 10) & 0x1F;
-//     uint16_t mantissa = h & 0x3FF;
-
-//     // Initialize a 32-bit floating point variable
-//     uint32_t result = 0;
-
-//     if (exponent == 0)
-//     {
-//         if (mantissa == 0)
-//         {
-//             // Zero
-//             result = sign << 31; // Just keep the sign bit
-//         }
-//         else
-//         {
-//             // Subnormal numbers
-//             float_t subnormal = (float_t)(mantissa) / (1 << 10);
-//             result = ((uint32_t)sign << 31) | (*(uint32_t *)&subnormal);
-//         }
-//     }
-//     else if (exponent == 31)
-//     {
-//         // Infinite or NaN
-//         result = (sign << 31) | (0xFF << 23) | (mantissa << 13);
-//     }
-//     else
-//     {
-//         // Normalized numbers
-//         uint32_t new_exp = exponent - 15 + 127; // Adjust the exponent
-//         result = (sign << 31) | (new_exp << 23) | (mantissa << 13);
-//     }
-
-//     return result;
-// }
-
 static float_t npy_half_to_float(uint16_t h)
 {
     union
