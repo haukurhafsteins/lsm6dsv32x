@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include "lsm6dsv32x.h"
+#include "lsm6dsv80x.hpp"
 #include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -398,25 +398,25 @@ int lsm6dsv80x_read_fifo_element(fifo_element_t *el)
 
         switch (f_data.tag)
         {
-        case 0x2/*LSM6DSV80X_XL_NC_TAG*/:
+        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_XL_NC_TAG:
             el->acc.x = lsm6dsv80x_to_mg(*datax) * 0.001;
             el->acc.y = lsm6dsv80x_to_mg(*datay) * 0.001;
             el->acc.z = lsm6dsv80x_to_mg(*dataz) * 0.001;
             elements_per_sample++;
             break;
-        case 0x1/*LSM6DSV80X_GY_NC_TAG*/:
+        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_GY_NC_TAG:
             el->gyro.x = lsm6dsv80x_to_mdps(*datax) * 0.001;
             el->gyro.y = lsm6dsv80x_to_mdps(*datay) * 0.001;
             el->gyro.z = lsm6dsv80x_to_mdps(*dataz) * 0.001;
             elements_per_sample++;
             break;
-        case 0x4/*LSM6DSV80X_TIMESTAMP_TAG*/:
+        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_TIMESTAMP_TAG:
             timestamp = *ts;
             el->timestamp = timestamp * 0.00002175;
             elements_per_sample++;
             break;
 #ifdef USE_GBIAS
-        case LSM6DSV80X_SFLP_GYROSCOPE_BIAS_TAG:
+        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GYROSCOPE_BIAS_TAG:
             axis = (int16_t *)&f_data.data[0];
             el->gbias.x = lsm6dsv80x_from_fs125_to_mdps(axis[0]);
             el->gbias.y = lsm6dsv80x_from_fs125_to_mdps(axis[1]);
@@ -424,14 +424,14 @@ int lsm6dsv80x_read_fifo_element(fifo_element_t *el)
             elements_per_sample++;
             break;
 #endif
-        case 0x17/*LSM6DSV80X_SFLP_GRAVITY_VECTOR_TAG*/:
+        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GRAVITY_VECTOR_TAG:
             axis = (int16_t *)&f_data.data[0];
             el->gravity.x = lsm6dsv80x_from_sflp_to_mg(axis[0]) * 0.001;
             el->gravity.y = lsm6dsv80x_from_sflp_to_mg(axis[1]) * 0.001;
             el->gravity.z = lsm6dsv80x_from_sflp_to_mg(axis[2]) * 0.001;
             elements_per_sample++;
             break;
-        case 0x13/*LSM6DSV80X_SFLP_GAME_ROTATION_VECTOR_TAG*/:
+        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GAME_ROTATION_VECTOR_TAG:
             sflp2q(quat, (uint16_t *)&f_data.data[0]);
             el->q.w = quat[3];
             el->q.x = quat[0];
