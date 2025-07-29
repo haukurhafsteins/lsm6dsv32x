@@ -28,9 +28,9 @@ typedef struct {
 } lsm6dsv80x_sources_t;
 
 typedef struct {
-    vector3_t acc;
-    vector3_t gyro;
-    vector3_t gravity;
+    Vector3<float> acc;
+    Vector3<float> gyro;
+    Vector3<float> gravity;
     Quaternion<float> q;
     float timestamp;
 } fifo_element_t;
