@@ -64,6 +64,9 @@ static lsm6dsv80x_xl_full_scale_t acc_range_to_lsm6_range(uint8_t range)
     switch (range)
     {
     default:
+    case 2:
+        lsm6dsv80x_to_mg = lsm6dsv80x_from_fs2_to_mg;
+        return LSM6DSV80X_2g;
     case 4:
         lsm6dsv80x_to_mg = lsm6dsv80x_from_fs4_to_mg;
         return LSM6DSV80X_4g;
@@ -121,6 +124,26 @@ static lsm6dsv80x_data_rate_t sampling_rate_to_lsm6_rate(uint16_t rate)
         return LSM6DSV80X_ODR_AT_7680Hz;
     default:
         return LSM6DSV80X_ODR_AT_480Hz;
+    }
+}
+
+static lsm6dsv80x_sflp_data_rate_t sampling_rate_to_sflp_rate(uint16_t rate)
+{
+    switch (rate)
+    {
+    case 60:
+        return LSM6DSV80X_SFLP_60Hz;
+    case 120:
+        return LSM6DSV80X_SFLP_120Hz;
+    case 240:
+        return LSM6DSV80X_SFLP_240Hz;
+    case 480:
+    case 960:
+    case 1920:
+    case 3840:
+    case 7680:
+    default:
+        return LSM6DSV80X_SFLP_480Hz;
     }
 }
 
@@ -189,7 +212,13 @@ static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, ui
     t.tx_buffer = tx_buf;
     t.rx_buffer = NULL;
 
-    return (spi_device_polling_transmit(dev_handle_LSM6DSV32, &t) == ESP_OK) ? 0 : -1;
+    esp_err_t err = spi_device_polling_transmit(dev_handle_LSM6DSV32, &t);
+    if (err != ESP_OK)
+    {
+        printf("SPI write error: %s\n", esp_err_to_name(err));
+        return -1;
+    }
+    return 0;
 }
 
 static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
@@ -207,7 +236,10 @@ static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t 
 
     esp_err_t err = spi_device_polling_transmit(dev_handle_LSM6DSV32, &t);
     if (err != ESP_OK)
+    {
+        printf("SPI read error: %s\n", esp_err_to_name(err));
         return -1;
+    }
 
     memcpy(bufp, &rx_buf[1], len);  // Skip dummy byte
     return 0;
@@ -227,7 +259,7 @@ static void setup_sampling_rate()
 
     lsm6dsv80x_xl_data_rate_set(&dev_ctx, sampling_rate_to_lsm6_rate(cfg.sampleRate));
     lsm6dsv80x_gy_data_rate_set(&dev_ctx, sampling_rate_to_lsm6_rate(cfg.sampleRate));
-    lsm6dsv80x_sflp_data_rate_set(&dev_ctx, (lsm6dsv80x_sflp_data_rate_t)sampling_rate_to_lsm6_rate(cfg.sampleRate));
+    lsm6dsv80x_sflp_data_rate_set(&dev_ctx, sampling_rate_to_sflp_rate(cfg.sampleRate));
     lsm6dsv80x_timestamp_set(&dev_ctx, PROPERTY_ENABLE);
     lsm6dsv80x_sflp_game_rotation_set(&dev_ctx, PROPERTY_ENABLE);
 }
@@ -369,16 +401,9 @@ int lsm6dsv80x_read_fifo_element(fifo_element_t *el)
     int16_t *dataz;
     int32_t *ts;
     int32_t timestamp = 0;
+    uint32_t accCount = 0, gyroCount = 0, gravityCount = 0, quatCount = 0, timestampCount = 0;
 
-    // IMPORTANT BEGIN
-    // This number must be kept in sync with the number of variables
-    // configured in the setup_fifo() function.
-    int elements_per_sample = 0;
-    // IMPORTANT END
-
-    // static int samples_per_sec = 0;
-
-    while (elements_per_sample != max_elements_per_sample)
+    while (accCount < 1 || gyroCount < 1 || gravityCount < 1 || quatCount < 1 || timestampCount < 1)
     {
         lsm6dsv80x_fifo_out_raw_t f_data;
 
@@ -388,7 +413,7 @@ int lsm6dsv80x_read_fifo_element(fifo_element_t *el)
             return -1;
         }
 
-        if (f_data.tag == 0/*LSM6DSV80X_FIFO_EMPTY*/)
+        if (f_data.tag == lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_FIFO_EMPTY)
             return 0;
 
         datax = (int16_t *)&f_data.data[0];
@@ -399,50 +424,58 @@ int lsm6dsv80x_read_fifo_element(fifo_element_t *el)
         switch (f_data.tag)
         {
         case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_XL_NC_TAG:
+            if (accCount)
+                ESP_LOGW(TAG, "Multiple accelerometer data in FIFO element");
+            accCount++;
             el->acc.x = lsm6dsv80x_to_mg(*datax) * 0.001;
             el->acc.y = lsm6dsv80x_to_mg(*datay) * 0.001;
             el->acc.z = lsm6dsv80x_to_mg(*dataz) * 0.001;
-            elements_per_sample++;
             break;
         case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_GY_NC_TAG:
+            if (gyroCount)
+                ESP_LOGW(TAG, "Multiple gyroscope data in FIFO element");
+            gyroCount++;
             el->gyro.x = lsm6dsv80x_to_mdps(*datax) * 0.001;
             el->gyro.y = lsm6dsv80x_to_mdps(*datay) * 0.001;
             el->gyro.z = lsm6dsv80x_to_mdps(*dataz) * 0.001;
-            elements_per_sample++;
             break;
         case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_TIMESTAMP_TAG:
+            if (timestampCount)
+                ESP_LOGW(TAG, "Multiple timestamps in FIFO element");
+            timestampCount++;
             timestamp = *ts;
             el->timestamp = timestamp * 0.00002175;
-            elements_per_sample++;
             break;
-#ifdef USE_GBIAS
-        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GYROSCOPE_BIAS_TAG:
-            axis = (int16_t *)&f_data.data[0];
-            el->gbias.x = lsm6dsv80x_from_fs125_to_mdps(axis[0]);
-            el->gbias.y = lsm6dsv80x_from_fs125_to_mdps(axis[1]);
-            el->gbias.z = lsm6dsv80x_from_fs125_to_mdps(axis[2]);
-            elements_per_sample++;
-            break;
-#endif
         case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GRAVITY_VECTOR_TAG:
+            if (gravityCount)
+                ESP_LOGW(TAG, "Multiple gravity vectors in FIFO element");
+            gravityCount++;
             axis = (int16_t *)&f_data.data[0];
             el->gravity.x = lsm6dsv80x_from_sflp_to_mg(axis[0]) * 0.001;
             el->gravity.y = lsm6dsv80x_from_sflp_to_mg(axis[1]) * 0.001;
             el->gravity.z = lsm6dsv80x_from_sflp_to_mg(axis[2]) * 0.001;
-            elements_per_sample++;
             break;
         case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GAME_ROTATION_VECTOR_TAG:
+            // if (quatCount)
+            //     ESP_LOGW(TAG, "Multiple quaternion vectors in FIFO element");
+            quatCount++;
             sflp2q(quat, (uint16_t *)&f_data.data[0]);
             el->q.w = quat[3];
             el->q.x = quat[0];
             el->q.y = quat[1];
             el->q.z = quat[2];
-            elements_per_sample++;
             break;
         default:
             ESP_LOGW(TAG, "Unknown tag %d\n", f_data.tag);
             break;
         }
+    }
+
+    if (accCount != 1 || gyroCount != 1 || gravityCount != 1 /*|| quatCount != 1*/ || timestampCount != 1)
+    {
+        ESP_LOGE(TAG, "Invalid FIFO element: acc %ld, gyro %ld, gravity %ld, quat %ld, timestamp %ld",
+                 accCount, gyroCount, gravityCount, quatCount, timestampCount);
+        return -1;
     }
     if (debug)
     {
@@ -455,17 +488,7 @@ int lsm6dsv80x_read_fifo_element(fifo_element_t *el)
                el->q.w, el->q.x, el->q.y, el->q.z);
         RUN_CODE_EVERY_END();
     }
-    // static int batches_per_sec = 0;
-    // batches_per_sec++;
-    // RUN_CODE_EVERY_START(1.0)
-    //     printf("%d s/sec, %d bt/sec\n", samples_per_sec, batches_per_sec);
-    //     samples_per_sec = 0;
-    //     batches_per_sec = 0;
-    // RUN_CODE_EVERY_END()
-    int ret = elements_per_sample == max_elements_per_sample;
-    if (ret != 1)
-        ESP_LOGW(TAG, "FIFO element incomplete, %d\n", elements_per_sample);
-    return ret;
+    return 1;
 }
 
 // float lsm6dsv80x_get_timestamp_resolution(float sample_rate)
