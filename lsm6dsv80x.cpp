@@ -529,7 +529,7 @@ void lsm6dsv80x_start_tapping(bool start)
     if (start)
         setup_tapping();
     uint8_t property_enable = start ? PROPERTY_ENABLE : PROPERTY_DISABLE;
-    lsm6dsv80x_pin_int_route_t pin_int2 = {0};
+    lsm6dsv80x_pin_int_route_t pin_int2 = {};
     pin_int2.double_tap = property_enable;
     pin_int2.single_tap = property_enable;
     // pin_int2.sleep_change = property_enable;
