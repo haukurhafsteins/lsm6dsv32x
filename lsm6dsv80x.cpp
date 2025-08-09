@@ -6,7 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "esp_log_internal.h"
+#include "esp_log_buffer.h"
 #include "esp_timer.h"
 #include "vectors.h"
 
@@ -56,7 +56,6 @@ static lsm6dsv80x_cfg_t cfg = {
     .fifoWatermark = 32,
     .fifoMode = LSM6DSV80X_STREAM_MODE,
     .timeout = 0};
-static int max_elements_per_sample = 0;
 static bool debug = false;
 
 static lsm6dsv80x_xl_full_scale_t acc_range_to_lsm6_range(uint8_t range)
@@ -183,28 +182,35 @@ static float_t npy_half_to_float(uint16_t h)
     return conv.ret;
 }
 
-static void sflp2q(float_t quat[4], uint16_t sflp[3])
+void sflp2q(float *out, const uint16_t *in)
 {
-    float_t sumsq = 0;
-
-    quat[0] = npy_half_to_float(sflp[0]);
-    quat[1] = npy_half_to_float(sflp[1]);
-    quat[2] = npy_half_to_float(sflp[2]);
-
-    for (uint8_t i = 0; i < 3; i++)
-        sumsq += quat[i] * quat[i];
-
-    if (sumsq > 1.0f)
-        sumsq = 1.0f;
-
-    quat[3] = sqrtf(1.0f - sumsq);
+    for (int i = 0; i < 4; i++)
+    {
+        out[i] = ((int16_t)in[i]) / 32768.0f;
+    }
 }
 
+// static void sflp2q(float_t quat[4], uint16_t sflp[3])
+// {
+//     float_t sumsq = 0;
+
+//     quat[0] = npy_half_to_float(sflp[0]);
+//     quat[1] = npy_half_to_float(sflp[1]);
+//     quat[2] = npy_half_to_float(sflp[2]);
+
+//     for (uint8_t i = 0; i < 3; i++)
+//         sumsq += quat[i] * quat[i];
+
+//     if (sumsq > 1.0f)
+//         sumsq = 1.0f;
+
+//     quat[3] = sqrtf(1.0f - sumsq);
+// }
 
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
 {
     uint8_t tx_buf[1 + len];
-    tx_buf[0] = reg & 0x7F;  // Write command
+    tx_buf[0] = reg & 0x7F; // Write command
     memcpy(&tx_buf[1], bufp, len);
 
     spi_transaction_t t = {};
@@ -224,10 +230,10 @@ static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, ui
 static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
 {
     uint8_t tx_buf[1 + len];
-    uint8_t rx_buf[1 + len];  // First byte will be dummy
+    uint8_t rx_buf[1 + len]; // First byte will be dummy
 
-    tx_buf[0] = reg | 0x80;  // Read command
-    memset(&tx_buf[1], 0xFF, len);  // Dummy bytes
+    tx_buf[0] = reg | 0x80;        // Read command
+    memset(&tx_buf[1], 0xFF, len); // Dummy bytes
 
     spi_transaction_t t = {};
     t.length = (1 + len) * 8;
@@ -241,7 +247,7 @@ static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t 
         return -1;
     }
 
-    memcpy(bufp, &rx_buf[1], len);  // Skip dummy byte
+    memcpy(bufp, &rx_buf[1], len); // Skip dummy byte
     return 0;
 }
 
@@ -253,6 +259,11 @@ static void platform_delay(uint32_t millisec)
 
 static void setup_sampling_rate()
 {
+    // lsm6dsv80x_xl_offset_on_out_set(&dev_ctx, PROPERTY_DISABLE);
+    // lsm6dsv80x_xl_offset_mg_set(&dev_ctx, {0, 0, 0});
+    // lsm6dsv80x_hg_xl_offset_mg_set(&dev_ctx, {0, 0, 0});
+    // lsm6dsv80x_hg_xl_data_rate_set(&dev_ctx, LSM6DSV80X_HG_XL_ODR_AT_120Hz);
+
     lsm6dsv80x_block_data_update_set(&dev_ctx, PROPERTY_DISABLE);
     lsm6dsv80x_xl_full_scale_set(&dev_ctx, acc_range_to_lsm6_range(cfg.accelRange));
     lsm6dsv80x_gy_full_scale_set(&dev_ctx, gyro_range_to_lsm6_range(cfg.gyroRange));
@@ -260,6 +271,7 @@ static void setup_sampling_rate()
     lsm6dsv80x_xl_data_rate_set(&dev_ctx, sampling_rate_to_lsm6_rate(cfg.sampleRate));
     lsm6dsv80x_gy_data_rate_set(&dev_ctx, sampling_rate_to_lsm6_rate(cfg.sampleRate));
     lsm6dsv80x_sflp_data_rate_set(&dev_ctx, sampling_rate_to_sflp_rate(cfg.sampleRate));
+
     lsm6dsv80x_timestamp_set(&dev_ctx, PROPERTY_ENABLE);
     lsm6dsv80x_sflp_game_rotation_set(&dev_ctx, PROPERTY_ENABLE);
 }
@@ -269,22 +281,16 @@ static void setup_fifo()
     lsm6dsv80x_fifo_mode_set(&dev_ctx, LSM6DSV80X_BYPASS_MODE);
     lsm6dsv80x_fifo_watermark_set(&dev_ctx, cfg.fifoWatermark);
     lsm6dsv80x_fifo_xl_batch_set(&dev_ctx, cfg.batching);
-    max_elements_per_sample = 1;
     lsm6dsv80x_fifo_gy_batch_set(&dev_ctx, (lsm6dsv80x_fifo_gy_batch_t)cfg.batching);
-    max_elements_per_sample++;
     lsm6dsv80x_fifo_timestamp_batch_set(&dev_ctx, LSM6DSV80X_TMSTMP_DEC_1);
-    max_elements_per_sample++;
     lsm6dsv80x_fifo_sflp_raw_t fifo_sflp = {};
     fifo_sflp.game_rotation = 1;
-    max_elements_per_sample++;
     fifo_sflp.gravity = 1;
-    max_elements_per_sample++;
 #ifdef USE_GBIAS
     fifo_sflp.gbias = 1;
-    max_elements_per_sample++;
 #endif
     lsm6dsv80x_fifo_sflp_batch_set(&dev_ctx, fifo_sflp);
-    lsm6dsv80x_fifo_mode_set(&dev_ctx, cfg.fifoMode);
+    lsm6dsv80x_fifo_mode_set(&dev_ctx, LSM6DSV80X_STREAM_MODE);
 }
 
 static void clear_fifo()
@@ -392,7 +398,12 @@ int lsm6dsv80x_fifo_data_available()
     return fifo_status.fifo_level;
 }
 
-int lsm6dsv80x_read_fifo_element(fifo_element_t *el)
+int lsm6dsv80x_fifo_read_element(lsm6dsv80x_fifo_out_raw_t &f_data)
+{
+    return lsm6dsv80x_fifo_out_raw_get(&dev_ctx, &f_data);
+}
+
+int lsm6dsv80x_fifo_process_element(lsm6dsv80x_fifo_out_raw_t &f_data, fifo_element_t &el)
 {
     float_t quat[4];
     int16_t *axis;
@@ -401,94 +412,46 @@ int lsm6dsv80x_read_fifo_element(fifo_element_t *el)
     int16_t *dataz;
     int32_t *ts;
     int32_t timestamp = 0;
-    uint32_t accCount = 0, gyroCount = 0, gravityCount = 0, quatCount = 0, timestampCount = 0;
 
-    while (accCount < 1 || gyroCount < 1 || gravityCount < 1 || quatCount < 1 || timestampCount < 1)
+    datax = (int16_t *)&f_data.data[0];
+    datay = (int16_t *)&f_data.data[2];
+    dataz = (int16_t *)&f_data.data[4];
+    ts = (int32_t *)&f_data.data[0];
+
+    switch (f_data.tag)
     {
-        lsm6dsv80x_fifo_out_raw_t f_data;
-
-        if (-1 == lsm6dsv80x_fifo_out_raw_get(&dev_ctx, &f_data))
-        {
-            ESP_LOGE(TAG, "FIFO read error\n");
-            return -1;
-        }
-
-        if (f_data.tag == lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_FIFO_EMPTY)
-            return 0;
-
-        datax = (int16_t *)&f_data.data[0];
-        datay = (int16_t *)&f_data.data[2];
-        dataz = (int16_t *)&f_data.data[4];
-        ts = (int32_t *)&f_data.data[0];
-
-        switch (f_data.tag)
-        {
-        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_XL_NC_TAG:
-            if (accCount)
-                ESP_LOGW(TAG, "Multiple accelerometer data in FIFO element");
-            accCount++;
-            el->acc.x = lsm6dsv80x_to_mg(*datax) * 0.001;
-            el->acc.y = lsm6dsv80x_to_mg(*datay) * 0.001;
-            el->acc.z = lsm6dsv80x_to_mg(*dataz) * 0.001;
-            break;
-        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_GY_NC_TAG:
-            if (gyroCount)
-                ESP_LOGW(TAG, "Multiple gyroscope data in FIFO element");
-            gyroCount++;
-            el->gyro.x = lsm6dsv80x_to_mdps(*datax) * 0.001;
-            el->gyro.y = lsm6dsv80x_to_mdps(*datay) * 0.001;
-            el->gyro.z = lsm6dsv80x_to_mdps(*dataz) * 0.001;
-            break;
-        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_TIMESTAMP_TAG:
-            if (timestampCount)
-                ESP_LOGW(TAG, "Multiple timestamps in FIFO element");
-            timestampCount++;
-            timestamp = *ts;
-            el->timestamp = timestamp * 0.00002175;
-            break;
-        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GRAVITY_VECTOR_TAG:
-            if (gravityCount)
-                ESP_LOGW(TAG, "Multiple gravity vectors in FIFO element");
-            gravityCount++;
-            axis = (int16_t *)&f_data.data[0];
-            el->gravity.x = lsm6dsv80x_from_sflp_to_mg(axis[0]) * 0.001;
-            el->gravity.y = lsm6dsv80x_from_sflp_to_mg(axis[1]) * 0.001;
-            el->gravity.z = lsm6dsv80x_from_sflp_to_mg(axis[2]) * 0.001;
-            break;
-        case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GAME_ROTATION_VECTOR_TAG:
-            // if (quatCount)
-            //     ESP_LOGW(TAG, "Multiple quaternion vectors in FIFO element");
-            quatCount++;
-            sflp2q(quat, (uint16_t *)&f_data.data[0]);
-            el->q.w = quat[3];
-            el->q.x = quat[0];
-            el->q.y = quat[1];
-            el->q.z = quat[2];
-            break;
-        default:
-            ESP_LOGW(TAG, "Unknown tag %d\n", f_data.tag);
-            break;
-        }
-    }
-
-    if (accCount != 1 || gyroCount != 1 || gravityCount != 1 /*|| quatCount != 1*/ || timestampCount != 1)
-    {
-        ESP_LOGE(TAG, "Invalid FIFO element: acc %ld, gyro %ld, gravity %ld, quat %ld, timestamp %ld",
-                 accCount, gyroCount, gravityCount, quatCount, timestampCount);
+    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_XL_NC_TAG:
+        el.acc.x = lsm6dsv80x_to_mg(*datax) * 0.001;
+        el.acc.y = lsm6dsv80x_to_mg(*datay) * 0.001;
+        el.acc.z = lsm6dsv80x_to_mg(*dataz) * 0.001;
+        break;
+    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_GY_NC_TAG:
+        el.gyro.x = lsm6dsv80x_to_mdps(*datax) * 0.001;
+        el.gyro.y = lsm6dsv80x_to_mdps(*datay) * 0.001;
+        el.gyro.z = lsm6dsv80x_to_mdps(*dataz) * 0.001;
+        break;
+    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_TIMESTAMP_TAG:
+        timestamp = *ts;
+        el.timestamp = timestamp * 0.00002175;
+        break;
+    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GRAVITY_VECTOR_TAG:
+        axis = (int16_t *)&f_data.data[0];
+        el.gravity.x = lsm6dsv80x_from_sflp_to_mg(axis[0]) * 0.001;
+        el.gravity.y = lsm6dsv80x_from_sflp_to_mg(axis[1]) * 0.001;
+        el.gravity.z = lsm6dsv80x_from_sflp_to_mg(axis[2]) * 0.001;
+        break;
+    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GAME_ROTATION_VECTOR_TAG:
+        sflp2q(quat, (uint16_t *)&f_data.data[0]);
+        el.q.x = quat[0];
+        el.q.y = quat[1];
+        el.q.z = quat[2];
+        el.q.w = quat[3];
+        break;
+    default:
+        ESP_LOGW(TAG, "Unknown tag %d\n", f_data.tag);
         return -1;
     }
-    if (debug)
-    {
-        RUN_CODE_EVERY_START(1.0);
-        printf("%.2f: FIFO acc: %.3f %.3f %.3f, gyro: %.3f %.3f %.3f, gravity: %.3f %.3f %.3f, q: %.3f %.3f %.3f %.3f\n",
-               el->timestamp,
-               el->acc.x, el->acc.y, el->acc.z,
-               el->gyro.x, el->gyro.y, el->gyro.z,
-               el->gravity.x, el->gravity.y, el->gravity.z,
-               el->q.w, el->q.x, el->q.y, el->q.z);
-        RUN_CODE_EVERY_END();
-    }
-    return 1;
+    return 0;
 }
 
 // float lsm6dsv80x_get_timestamp_resolution(float sample_rate)
@@ -503,7 +466,7 @@ int lsm6dsv80x_read_fifo_element(fifo_element_t *el)
 // }
 void lsm6dsv80x_init_spi(spi_device_handle_t *dev_handle)
 {
-   dev_handle_LSM6DSV32 = *dev_handle;
+    dev_handle_LSM6DSV32 = *dev_handle;
 }
 
 void lsm6dsv80x_start_sampling(bool start)
