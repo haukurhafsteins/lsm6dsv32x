@@ -182,30 +182,61 @@ static float_t npy_half_to_float(uint16_t h)
     return conv.ret;
 }
 
-void sflp2q(float *out, const uint16_t *in)
+static void sflp2q(Quaternion<float> &quat, uint16_t sflp[3])
 {
-    for (int i = 0; i < 4; i++)
-    {
-        out[i] = ((int16_t)in[i]) / 32768.0f;
-    }
+    float sumsq = 0.0f;
+    quat.x = npy_half_to_float(sflp[0]);
+    quat.y = npy_half_to_float(sflp[1]);
+    quat.z = npy_half_to_float(sflp[2]);
+    quat.w = 0.0f; // w is not provided in SFLP, we reconstruct it
+
+    sumsq = quat.x * quat.x + quat.y * quat.y + quat.z * quat.z;
+
+    if (sumsq > 1.0f) sumsq = 1.0f;
+    if (sumsq < 0.0f) sumsq = 0.0f;
+
+    quat.w = sqrtf(1.0f - sumsq); // positive w
+    quat.normalize();
 }
 
-// static void sflp2q(float_t quat[4], uint16_t sflp[3])
-// {
-//     float_t sumsq = 0;
+// Assumes Quaternion<T> has public members: x, y, z, w  (xyzw order).
+// Reconstructs w from x,y,z and optionally matches hemisphere vs q_prev.
+// If q_prev == nullptr, it just returns a unit quaternion with w >= 0.
+template <typename T>
+inline void sflp2q_continuous(Quaternion<T>& q,
+                              const Quaternion<T>* q_prev,   // pass previous quaternion, or nullptr on first call
+                              const uint16_t sflp[3])        // SFLP half-precision components for x,y,z
+{
+    // Load x,y,z from your half->float converter, then cast to T.
+    q.x = static_cast<T>(npy_half_to_float(sflp[0]));
+    q.y = static_cast<T>(npy_half_to_float(sflp[1]));
+    q.z = static_cast<T>(npy_half_to_float(sflp[2]));
 
-//     quat[0] = npy_half_to_float(sflp[0]);
-//     quat[1] = npy_half_to_float(sflp[1]);
-//     quat[2] = npy_half_to_float(sflp[2]);
+    // x^2 + y^2 + z^2 with clamping for numeric safety
+    T sumsq = q.x*q.x + q.y*q.y + q.z*q.z;
+    if (sumsq > static_cast<T>(1)) sumsq = static_cast<T>(1);
+    if (sumsq < static_cast<T>(0)) sumsq = static_cast<T>(0);
 
-//     for (uint8_t i = 0; i < 3; i++)
-//         sumsq += quat[i] * quat[i];
+    // Reconstruct positive w
+    q.w = static_cast<T>(std::sqrt(static_cast<long double>(1) - static_cast<long double>(sumsq)));
 
-//     if (sumsq > 1.0f)
-//         sumsq = 1.0f;
+    // (Optional) light renormalization to kill drift
+    {
+        T n = q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w;
+        if (n > static_cast<T>(0)) {
+            T invn = static_cast<T>(1) / static_cast<T>(std::sqrt(static_cast<long double>(n)));
+            q.x *= invn; q.y *= invn; q.z *= invn; q.w *= invn;
+        }
+    }
 
-//     quat[3] = sqrtf(1.0f - sumsq);
-// }
+    // Hemisphere continuity: ensure dot(q, q_prev) >= 0 by flipping all components if needed
+    if (q_prev) {
+        T dot = q.x*q_prev->x + q.y*q_prev->y + q.z*q_prev->z + q.w*q_prev->w;
+        if (dot < static_cast<T>(0)) {
+            q.x = -q.x; q.y = -q.y; q.z = -q.z; q.w = -q.w;
+        }
+    }
+}
 
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
 {
@@ -278,6 +309,7 @@ static void setup_sampling_rate()
 
 static void setup_fifo()
 {
+    // lsm6dsv80x_4d_mode_set(&dev_ctx, PROPERTY_ENABLE);
     lsm6dsv80x_fifo_mode_set(&dev_ctx, LSM6DSV80X_BYPASS_MODE);
     lsm6dsv80x_fifo_watermark_set(&dev_ctx, cfg.fifoWatermark);
     lsm6dsv80x_fifo_xl_batch_set(&dev_ctx, cfg.batching);
@@ -403,55 +435,104 @@ int lsm6dsv80x_fifo_read_element(lsm6dsv80x_fifo_out_raw_t &f_data)
     return lsm6dsv80x_fifo_out_raw_get(&dev_ctx, &f_data);
 }
 
-int lsm6dsv80x_fifo_process_element(lsm6dsv80x_fifo_out_raw_t &f_data, fifo_element_t &el)
+void lsm6dsv80x_fifo_process_xl(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &acc)
 {
-    float_t quat[4];
-    int16_t *axis;
-    int16_t *datax;
-    int16_t *datay;
-    int16_t *dataz;
-    int32_t *ts;
-    int32_t timestamp = 0;
+    int16_t *datax = (int16_t *)&f_data.data[0];
+    int16_t *datay = (int16_t *)&f_data.data[2];
+    int16_t *dataz = (int16_t *)&f_data.data[4];
 
-    datax = (int16_t *)&f_data.data[0];
-    datay = (int16_t *)&f_data.data[2];
-    dataz = (int16_t *)&f_data.data[4];
-    ts = (int32_t *)&f_data.data[0];
+    acc.x = lsm6dsv80x_to_mg(*datax) * 0.001;
+    acc.y = lsm6dsv80x_to_mg(*datay) * 0.001;
+    acc.z = lsm6dsv80x_to_mg(*dataz) * 0.001;
+}
 
-    switch (f_data.tag)
-    {
-    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_XL_NC_TAG:
-        el.acc.x = lsm6dsv80x_to_mg(*datax) * 0.001;
-        el.acc.y = lsm6dsv80x_to_mg(*datay) * 0.001;
-        el.acc.z = lsm6dsv80x_to_mg(*dataz) * 0.001;
-        break;
-    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_GY_NC_TAG:
-        el.gyro.x = lsm6dsv80x_to_mdps(*datax) * 0.001;
-        el.gyro.y = lsm6dsv80x_to_mdps(*datay) * 0.001;
-        el.gyro.z = lsm6dsv80x_to_mdps(*dataz) * 0.001;
-        break;
-    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_TIMESTAMP_TAG:
-        timestamp = *ts;
-        el.timestamp = timestamp * 0.00002175;
-        break;
-    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GRAVITY_VECTOR_TAG:
-        axis = (int16_t *)&f_data.data[0];
-        el.gravity.x = lsm6dsv80x_from_sflp_to_mg(axis[0]) * 0.001;
-        el.gravity.y = lsm6dsv80x_from_sflp_to_mg(axis[1]) * 0.001;
-        el.gravity.z = lsm6dsv80x_from_sflp_to_mg(axis[2]) * 0.001;
-        break;
-    case lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_SFLP_GAME_ROTATION_VECTOR_TAG:
-        sflp2q(quat, (uint16_t *)&f_data.data[0]);
-        el.q.x = quat[0];
-        el.q.y = quat[1];
-        el.q.z = quat[2];
-        el.q.w = quat[3];
-        break;
-    default:
-        ESP_LOGW(TAG, "Unknown tag %d\n", f_data.tag);
-        return -1;
+void lsm6dsv80x_fifo_process_gyro(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gyro)
+{
+    int16_t *datax = (int16_t *)&f_data.data[0];
+    int16_t *datay = (int16_t *)&f_data.data[2];
+    int16_t *dataz = (int16_t *)&f_data.data[4];
+
+    gyro.x = lsm6dsv80x_to_mdps(*datax) * 0.001;
+    gyro.y = lsm6dsv80x_to_mdps(*datay) * 0.001;
+    gyro.z = lsm6dsv80x_to_mdps(*dataz) * 0.001;
+}
+
+void lsm6dsv80x_fifo_process_timestamp(lsm6dsv80x_fifo_out_raw_t &f_data, float &timestamp)
+{
+    int32_t *ts = (int32_t *)&f_data.data[0];
+    timestamp = *ts * 0.00002175; // Convert to seconds
+}
+void lsm6dsv80x_fifo_process_gravity(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gravity)
+{
+    int16_t *axis = (int16_t *)&f_data.data[0];
+    gravity.x = lsm6dsv80x_from_sflp_to_mg(axis[0]) * 0.001;
+    gravity.y = lsm6dsv80x_from_sflp_to_mg(axis[1]) * 0.001;
+    gravity.z = lsm6dsv80x_from_sflp_to_mg(axis[2]) * 0.001;
+}
+
+static inline uint16_t u16_le(const uint8_t* p) {
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+// f_data1 and f_data2 must be the two consecutive 0x13 words for one sample
+void lsm6dsv80x_fifo_process_sflp_game_rotation(lsm6dsv80x_fifo_out_raw_t &f_data1,
+                                                lsm6dsv80x_fifo_out_raw_t &f_data2,
+                                                Quaternion<float> &q)
+{
+    auto sensor_id = [](uint8_t tag){ return tag & 0x1F; };      // 5-bit sensor code
+    auto tag_cnt   = [](uint8_t tag){ return (tag >> 6) & 0x03; }; // 2-bit rolling counter
+
+    // Basic validation: both must be game-rotation vector (0x13)
+    if (sensor_id(f_data1.tag) != 0x13 || sensor_id(f_data2.tag) != 0x13) {
+        // Not our packets; zero out and return
+        q = {0,0,0,1};
+        return;
     }
-    return 0;
+
+    // Markers in X (little-endian): 0x0000 = first word, 0x0001 = second word
+    uint16_t m1 = u16_le(&f_data1.data[0]);
+    uint16_t m2 = u16_le(&f_data2.data[0]);
+
+    // Optional sanity: they usually share the same TAG_CNT
+    // (don’t hard-fail if they don’t; just a useful check)
+    // uint8_t c1 = tag_cnt(f_data1.tag), c2 = tag_cnt(f_data2.tag);
+
+    uint16_t hx=0, hy=0, hz=0, hw=0;
+
+    if (m1 == 0x0000 && m2 == 0x0001) {
+        // first then second (expected order)
+        hx = u16_le(&f_data1.data[2]); // QUATX
+        hy = u16_le(&f_data1.data[4]); // QUATY
+        hz = u16_le(&f_data2.data[2]); // QUATZ
+        hw = u16_le(&f_data2.data[4]); // QUATW
+    } else if (m1 == 0x0001 && m2 == 0x0000) {
+        // reversed arguments — still handle
+        hx = u16_le(&f_data2.data[2]); // QUATX
+        hy = u16_le(&f_data2.data[4]); // QUATY
+        hz = u16_le(&f_data1.data[2]); // QUATZ
+        hw = u16_le(&f_data1.data[4]); // QUATW
+    } else {
+        // Unexpected markers; bail safely
+        q = {0,0,0,1};
+        return;
+    }
+
+    // Convert half -> float (use your npy_half_to_float)
+    q.x = npy_half_to_float(hx);
+    q.y = npy_half_to_float(hy);
+    q.z = npy_half_to_float(hz);
+    q.w = npy_half_to_float(hw);
+
+    // Guard + normalize
+    if (!std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z) || !std::isfinite(q.w)) {
+        q = {0,0,0,1};
+        return;
+    }
+    float n2 = q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w;
+    if (n2 > 0.0f) {
+        float inv = 1.0f / std::sqrt(n2);
+        q.x *= inv; q.y *= inv; q.z *= inv; q.w *= inv;
+    }
 }
 
 // float lsm6dsv80x_get_timestamp_resolution(float sample_rate)

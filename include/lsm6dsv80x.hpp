@@ -43,7 +43,12 @@ void lsm6dsv80x_start_tapping(bool start);
 float lsm6dsv80x_get_timestamp_resolution(float sample_rate);
 int lsm6dsv80x_fifo_data_available();
 int lsm6dsv80x_fifo_read_element(lsm6dsv80x_fifo_out_raw_t &f_data);
-int lsm6dsv80x_fifo_process_element(lsm6dsv80x_fifo_out_raw_t &el, fifo_element_t &out);
+void lsm6dsv80x_fifo_process_xl(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &acc);
+void lsm6dsv80x_fifo_process_gyro(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gyro);
+void lsm6dsv80x_fifo_process_gravity(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gravity);
+void lsm6dsv80x_fifo_process_sflp_game_rotation(lsm6dsv80x_fifo_out_raw_t &f_data1, lsm6dsv80x_fifo_out_raw_t &f_data2, Quaternion<float> &q);
+void lsm6dsv80x_fifo_process_timestamp(lsm6dsv80x_fifo_out_raw_t &f_data, float &timestamp);
+
 void lsm6dsv80x_read_sources(lsm6dsv80x_sources_t *sources);
 void lsm6dsv80x_sleep();
 void lsm6dsv80x_set_debug(bool d);
