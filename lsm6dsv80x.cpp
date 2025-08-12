@@ -459,8 +459,8 @@ void lsm6dsv80x_fifo_process_gyro(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<flo
 
 void lsm6dsv80x_fifo_process_timestamp(lsm6dsv80x_fifo_out_raw_t &f_data, float &timestamp)
 {
-    int32_t *ts = (int32_t *)&f_data.data[0];
-    timestamp = *ts * 0.00002175; // Convert to seconds
+    int32_t *ts = (int32_t *)f_data.data;
+    timestamp = *ts * 0.0000217f; // Convert to seconds
 }
 void lsm6dsv80x_fifo_process_gravity(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gravity)
 {
