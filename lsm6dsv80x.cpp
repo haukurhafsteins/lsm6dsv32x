@@ -535,16 +535,17 @@ void lsm6dsv80x_fifo_process_sflp_game_rotation(lsm6dsv80x_fifo_out_raw_t &f_dat
     }
 }
 
-// float lsm6dsv80x_get_timestamp_resolution(float sample_rate)
-// {
-//     int8_t freq_fine;
-//     if (-1 == lsm6dsv80x_odr_cal_reg_get(&dev_ctx, &freq_fine))
-//     {
-//         printf("!!! Error getting odr calibration register !!!\n");
-//         return 0;
-//     }
-//     return 7680.0 * (1 + 0.0013 * (float)freq_fine) / sampling_rate_to_odrcoeff(sample_rate);
-// }
+float lsm6dsv80x_get_timestamp_resolution(float sample_rate)
+{
+    int8_t freq_fine;
+    if (-1 == lsm6dsv80x_odr_cal_reg_get(&dev_ctx, &freq_fine))
+    {
+        printf("!!! Error getting odr calibration register !!!\n");
+        return 0;
+    }
+    return 7680.0 * (1 + 0.0013 * (float)freq_fine) / sampling_rate_to_odrcoeff(sample_rate);
+}
+
 void lsm6dsv80x_init_spi(spi_device_handle_t *dev_handle)
 {
     dev_handle_LSM6DSV32 = *dev_handle;
