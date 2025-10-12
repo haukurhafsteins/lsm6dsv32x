@@ -14,16 +14,13 @@ Some examples of driver usage can be found [here](https://github.com/STMicroelec
 
 ------
 
-
-
 # 2 - Integration details
 
 The driver is platform-independent, you only need to define two functions for read and write transactions from the sensor hardware bus (ie. SPI or I²C) and an optional one to implement a delay of millisecond granularity. **A few devices integrate an extra bit in the communication protocol in order to enable multi read/write access, this bit must be managed in the read and write functions defined by the user.** Please refer to the read and write implementation in the [reference examples](https://github.com/STMicroelectronics/STMems_Standard_C_drivers/tree/master/lsm6dsv32x_STdC/examples).
 
-
 ### 2.a Source code integration
 
-- Include in your project the driver files of the sensor (.h and .c) 
+- Include in your project the driver files of the sensor (.h and .c)
 - Define in your code the read and write functions that use the I²C or SPI platform driver like the following:
 
 ```
