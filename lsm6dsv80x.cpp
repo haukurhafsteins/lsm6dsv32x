@@ -398,9 +398,9 @@ int lsm6dsv80x_fifo_data_available()
     }
     if (fifo_status.fifo_ovr == 1)
     {
-        ESP_LOGE(TAG, "FIFO overrun");
-        clear_fifo();
-        return -1;
+        ESP_LOGE(TAG, "FIFO OR");
+        // clear_fifo();
+        // return -1;
     }
     return fifo_status.fifo_level;
 }
