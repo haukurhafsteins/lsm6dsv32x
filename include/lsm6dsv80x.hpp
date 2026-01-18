@@ -40,7 +40,7 @@ void lsm6dsv80x_init();
 void lsm6dsv80x_config(lsm6dsv80x_cfg_t *cfg);
 void lsm6dsv80x_start_sampling(bool start);
 void lsm6dsv80x_start_tapping(bool start);
-float lsm6dsv80x_get_timestamp_resolution(float sample_rate);
+float lsm6dsv80x_get_timestamp_resolution();
 int lsm6dsv80x_fifo_data_available();
 int lsm6dsv80x_fifo_read_element(lsm6dsv80x_fifo_out_raw_t &f_data);
 void lsm6dsv80x_fifo_process_xl(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &acc);

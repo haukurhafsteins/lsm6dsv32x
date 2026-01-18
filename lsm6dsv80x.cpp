@@ -32,6 +32,7 @@ static lsm6dsv80x_cfg_t cfg = {
     .fifoMode = LSM6DSV80X_STREAM_MODE,
     .timeout = 0};
 static bool debug = false;
+static float timestamp_lsb_sec = 0.0000217f; // default from datasheet (21.7 us)
 
 static lsm6dsv80x_xl_full_scale_t acc_range_to_lsm6_range(uint8_t range)
 {
@@ -270,7 +271,7 @@ static void setup_sampling_rate()
     // lsm6dsv80x_hg_xl_offset_mg_set(&dev_ctx, {0, 0, 0});
     // lsm6dsv80x_hg_xl_data_rate_set(&dev_ctx, LSM6DSV80X_HG_XL_ODR_AT_120Hz);
 
-    lsm6dsv80x_block_data_update_set(&dev_ctx, PROPERTY_DISABLE);
+    lsm6dsv80x_block_data_update_set(&dev_ctx, PROPERTY_ENABLE);
     lsm6dsv80x_xl_full_scale_set(&dev_ctx, acc_range_to_lsm6_range(cfg.accelRange));
     lsm6dsv80x_gy_full_scale_set(&dev_ctx, gyro_range_to_lsm6_range(cfg.gyroRange));
 
@@ -435,7 +436,7 @@ void lsm6dsv80x_fifo_process_gyro(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<flo
 void lsm6dsv80x_fifo_process_timestamp(lsm6dsv80x_fifo_out_raw_t &f_data, float &timestamp)
 {
     int32_t *ts = (int32_t *)f_data.data;
-    timestamp = *ts * 0.0000217f; // Convert to seconds
+    timestamp = timestamp_lsb_sec * *ts; // Convert to seconds using calibrated LSB
 }
 void lsm6dsv80x_fifo_process_gravity(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gravity)
 {
@@ -510,7 +511,7 @@ void lsm6dsv80x_fifo_process_sflp_game_rotation(lsm6dsv80x_fifo_out_raw_t &f_dat
     }
 }
 
-float lsm6dsv80x_get_timestamp_resolution(float sample_rate)
+float lsm6dsv80x_get_timestamp_resolution()
 {
     int8_t freq_fine;
     if (-1 == lsm6dsv80x_odr_cal_reg_get(&dev_ctx, &freq_fine))
@@ -518,7 +519,9 @@ float lsm6dsv80x_get_timestamp_resolution(float sample_rate)
         printf("!!! Error getting odr calibration register !!!\n");
         return 0;
     }
-    return 7680.0 * (1 + 0.0013 * (float)freq_fine) / sampling_rate_to_odrcoeff(sample_rate);
+    // Timestamp clock is 46.08 kHz trimmed by FREQ_FINE (datasheet AN): Tlsb = 1 / (46.08 kHz * (1 + 0.0013 * freq_fine))
+    float clk_hz = 46080.0f * (1.0f + 0.0013f * (float)freq_fine);
+    return 1.0f / clk_hz;
 }
 
 void lsm6dsv80x_init_spi(spi_device_handle_t *dev_handle)
@@ -536,7 +539,7 @@ void lsm6dsv80x_start_sampling(bool start)
 
         int8_t freq_fine;
         lsm6dsv80x_odr_cal_reg_get(&dev_ctx, &freq_fine);
-        float tactual = 1 / (46080.0 * (1 + 0.0013 * (float)freq_fine));
+        float tactual = lsm6dsv80x_get_timestamp_resolution();
         float odractual = 7680.0 * (1 + 0.0013 * (float)freq_fine) / sampling_rate_to_odrcoeff(cfg.sampleRate);
         ESP_LOGI(TAG, "LSM6DSV80X started, sample rate: %d, acc range: %d, gyro range: %d timestamp res %fs, odr actual %fHz", cfg.sampleRate, cfg.accelRange, cfg.gyroRange, tactual, odractual);
     }
@@ -594,6 +597,8 @@ void lsm6dsv80x_config(lsm6dsv80x_cfg_t *newCfg)
     }
     lsm6dsv80x_reset();
     setup_sampling_rate();
+    timestamp_lsb_sec = lsm6dsv80x_get_timestamp_resolution();
+    printf("LSM6DSV80X timestamp LSB: %fus\n", timestamp_lsb_sec * 1e6);
     setup_fifo();
     // setup_filter();
 }
