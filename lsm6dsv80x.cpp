@@ -535,6 +535,10 @@ void lsm6dsv80x_start_sampling(bool start)
 
     if (start)
     {
+        // Re-arm the sensors: the stop path below powers them down, so
+        // restore ODRs, SFLP and batching before draining begins. Re-running
+        // the setup helpers is idempotent when nothing was stopped.
+        setup_sampling_rate();
         clear_fifo();
 
         int8_t freq_fine;
@@ -542,6 +546,19 @@ void lsm6dsv80x_start_sampling(bool start)
         float tactual = lsm6dsv80x_get_timestamp_resolution();
         float odractual = 7680.0 * (1 + 0.0013 * (float)freq_fine) / sampling_rate_to_odrcoeff(cfg.sampleRate);
         ESP_LOGI(TAG, "LSM6DSV80X started, sample rate: %d, acc range: %d, gyro range: %d timestamp res %fs, odr actual %fHz", cfg.sampleRate, cfg.accelRange, cfg.gyroRange, tactual, odractual);
+    }
+    else
+    {
+        // Actually power the sensors down between sessions. This branch used
+        // to be a bare printf, so the gyro + SFLP ran at 120 Hz from boot
+        // forever — idle battery life was gyro-dominated (~1 mA) regardless
+        // of light sleep. Tap detection is currently disabled, so the XL
+        // isn't needed at idle either; if tap returns, keep the XL running
+        // at a low ODR instead of OFF.
+        lsm6dsv80x_fifo_mode_set(&dev_ctx, LSM6DSV80X_BYPASS_MODE);
+        lsm6dsv80x_sflp_game_rotation_set(&dev_ctx, PROPERTY_DISABLE);
+        lsm6dsv80x_xl_data_rate_set(&dev_ctx, LSM6DSV80X_ODR_OFF);
+        lsm6dsv80x_gy_data_rate_set(&dev_ctx, LSM6DSV80X_ODR_OFF);
     }
 }
 
