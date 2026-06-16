@@ -147,6 +147,28 @@ static int sampling_rate_to_odrcoeff(uint16_t rate)
     }
 }
 
+// FIFO batching rate must track the ODR, otherwise the FIFO is filled at a
+// different rate than acc/gyro are produced. (XL and GY batch enums share the
+// same numeric values, so one mapping serves both.)
+static lsm6dsv80x_fifo_xl_batch_t sampling_rate_to_batching(uint16_t rate)
+{
+    switch (rate)
+    {
+    case 60:
+        return LSM6DSV80X_XL_BATCHED_AT_60Hz;
+    case 120:
+        return LSM6DSV80X_XL_BATCHED_AT_120Hz;
+    case 240:
+        return LSM6DSV80X_XL_BATCHED_AT_240Hz;
+    case 480:
+        return LSM6DSV80X_XL_BATCHED_AT_480Hz;
+    case 960:
+        return LSM6DSV80X_XL_BATCHED_AT_960Hz;
+    default:
+        return LSM6DSV80X_XL_BATCHED_AT_120Hz;
+    }
+}
+
 static float_t npy_half_to_float(uint16_t h)
 {
     union
@@ -288,8 +310,9 @@ static void setup_fifo()
     // lsm6dsv80x_4d_mode_set(&dev_ctx, PROPERTY_ENABLE);
     lsm6dsv80x_fifo_mode_set(&dev_ctx, LSM6DSV80X_BYPASS_MODE);
     lsm6dsv80x_fifo_watermark_set(&dev_ctx, cfg.fifoWatermark);
-    lsm6dsv80x_fifo_xl_batch_set(&dev_ctx, cfg.batching);
-    lsm6dsv80x_fifo_gy_batch_set(&dev_ctx, (lsm6dsv80x_fifo_gy_batch_t)cfg.batching);
+    const lsm6dsv80x_fifo_xl_batch_t batch = sampling_rate_to_batching(cfg.sampleRate);
+    lsm6dsv80x_fifo_xl_batch_set(&dev_ctx, batch);
+    lsm6dsv80x_fifo_gy_batch_set(&dev_ctx, (lsm6dsv80x_fifo_gy_batch_t)batch);
     lsm6dsv80x_fifo_timestamp_batch_set(&dev_ctx, LSM6DSV80X_TMSTMP_DEC_1);
     lsm6dsv80x_fifo_sflp_raw_t fifo_sflp = {};
     fifo_sflp.game_rotation = 1;
