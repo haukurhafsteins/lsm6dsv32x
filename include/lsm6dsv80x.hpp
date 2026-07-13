@@ -42,6 +42,8 @@ void lsm6dsv80x_start_sampling(bool start);
 void lsm6dsv80x_start_tapping(bool start);
 float lsm6dsv80x_get_timestamp_resolution();
 int lsm6dsv80x_fifo_data_available();
+/// @brief Total FIFO overruns detected (and cleared) since boot.
+uint32_t lsm6dsv80x_fifo_overrun_count();
 int lsm6dsv80x_fifo_read_element(lsm6dsv80x_fifo_out_raw_t &f_data);
 void lsm6dsv80x_fifo_process_xl(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &acc);
 void lsm6dsv80x_fifo_process_gyro(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gyro);

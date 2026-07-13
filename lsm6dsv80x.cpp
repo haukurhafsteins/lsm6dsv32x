@@ -32,6 +32,7 @@ static lsm6dsv80x_cfg_t cfg = {
     .fifoMode = LSM6DSV80X_STREAM_MODE,
     .timeout = 0};
 static bool debug = false;
+static uint32_t overrun_count = 0;
 static float timestamp_lsb_sec = 0.0000217f; // default from datasheet (21.7 us)
 
 static lsm6dsv80x_xl_full_scale_t acc_range_to_lsm6_range(uint8_t range)
@@ -422,11 +423,21 @@ int lsm6dsv80x_fifo_data_available()
     }
     if (fifo_status.fifo_ovr == 1)
     {
-        ESP_LOGE(TAG, "FIFO OR");
-        // clear_fifo();
-        // return -1;
+        // Samples were lost and the FIFO may hold torn packets (a word from
+        // the middle of a sample group as the oldest entry). Resync to a
+        // clean stream instead of draining garbage; the cost is the buffered
+        // backlog, bounded by the FIFO depth (~0.5 s at 120 Hz).
+        overrun_count++;
+        ESP_LOGE(TAG, "FIFO overrun #%u, clearing FIFO to resync", (unsigned)overrun_count);
+        clear_fifo();
+        return 0;
     }
     return fifo_status.fifo_level;
+}
+
+uint32_t lsm6dsv80x_fifo_overrun_count()
+{
+    return overrun_count;
 }
 
 int lsm6dsv80x_fifo_read_element(lsm6dsv80x_fifo_out_raw_t &f_data)
