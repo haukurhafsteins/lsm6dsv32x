@@ -447,34 +447,34 @@ int lsm6dsv80x_fifo_read_element(lsm6dsv80x_fifo_out_raw_t &f_data)
 
 void lsm6dsv80x_fifo_process_xl(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &acc)
 {
-    int16_t *datax = (int16_t *)&f_data.data[0];
-    int16_t *datay = (int16_t *)&f_data.data[2];
-    int16_t *dataz = (int16_t *)&f_data.data[4];
+    int16_t data[3];
+    memcpy(data, f_data.data, sizeof(data));
 
-    acc.x = lsm6dsv80x_to_mg(*datax) * 0.001;
-    acc.y = lsm6dsv80x_to_mg(*datay) * 0.001;
-    acc.z = lsm6dsv80x_to_mg(*dataz) * 0.001;
+    acc.x = lsm6dsv80x_to_mg(data[0]) * 0.001;
+    acc.y = lsm6dsv80x_to_mg(data[1]) * 0.001;
+    acc.z = lsm6dsv80x_to_mg(data[2]) * 0.001;
 }
 
 void lsm6dsv80x_fifo_process_gyro(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gyro)
 {
-    int16_t *datax = (int16_t *)&f_data.data[0];
-    int16_t *datay = (int16_t *)&f_data.data[2];
-    int16_t *dataz = (int16_t *)&f_data.data[4];
+    int16_t data[3];
+    memcpy(data, f_data.data, sizeof(data));
 
-    gyro.x = lsm6dsv80x_to_mdps(*datax) * 0.001;
-    gyro.y = lsm6dsv80x_to_mdps(*datay) * 0.001;
-    gyro.z = lsm6dsv80x_to_mdps(*dataz) * 0.001;
+    gyro.x = lsm6dsv80x_to_mdps(data[0]) * 0.001;
+    gyro.y = lsm6dsv80x_to_mdps(data[1]) * 0.001;
+    gyro.z = lsm6dsv80x_to_mdps(data[2]) * 0.001;
 }
 
 void lsm6dsv80x_fifo_process_timestamp(lsm6dsv80x_fifo_out_raw_t &f_data, float &timestamp)
 {
-    int32_t *ts = (int32_t *)f_data.data;
-    timestamp = timestamp_lsb_sec * *ts; // Convert to seconds using calibrated LSB
+    int32_t ts;
+    memcpy(&ts, f_data.data, sizeof(ts));
+    timestamp = timestamp_lsb_sec * ts; // Convert to seconds using calibrated LSB
 }
 void lsm6dsv80x_fifo_process_gravity(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gravity)
 {
-    int16_t *axis = (int16_t *)&f_data.data[0];
+    int16_t axis[3];
+    memcpy(axis, f_data.data, sizeof(axis));
     gravity.x = lsm6dsv80x_from_sflp_to_mg(axis[0]) * 0.001;
     gravity.y = lsm6dsv80x_from_sflp_to_mg(axis[1]) * 0.001;
     gravity.z = lsm6dsv80x_from_sflp_to_mg(axis[2]) * 0.001;
