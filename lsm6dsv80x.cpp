@@ -237,7 +237,10 @@ inline void sflp2q_continuous(Quaternion<T>& q,
 
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
 {
-    if (s_spi == nullptr || !s_spi->transfer_cmd(reg & 0x7F, bufp, nullptr, len))
+    // len == 0 is a command-only frame (the pre-seam code sent exactly the
+    // register byte); both rtos backends emit it as such.
+    const uint8_t *tx = len == 0 ? nullptr : bufp;
+    if (s_spi == nullptr || !s_spi->transfer_cmd(reg & 0x7F, tx, nullptr, len))
     {
         RTOS_LOGE(TAG, "SPI write error, reg 0x%02x len %u", reg, (unsigned)len);
         return -1;
@@ -247,6 +250,17 @@ static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, ui
 
 static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
 {
+    if (len == 0)
+    {
+        // Command-only frame, same as the pre-seam single register byte.
+        if (s_spi == nullptr || !s_spi->transfer_cmd(reg | 0x80, nullptr, nullptr, 0))
+        {
+            RTOS_LOGE(TAG, "SPI read error, reg 0x%02x len 0", reg);
+            return -1;
+        }
+        return 0;
+    }
+
     // 0xFF dummies on MOSI during the data phase, matching the pre-seam
     // framing byte for byte (the sensor ignores MOSI while it drives MISO).
     uint8_t tx_buf[len];
