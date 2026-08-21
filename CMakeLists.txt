@@ -1,3 +1,3 @@
 idf_component_register(SRCS "lsm6dsv80x.cpp" "lsm6dsv80x_reg.c"
-                    REQUIRES driver vectors esp_timer
+                    REQUIRES rtos vectors
                     INCLUDE_DIRS "." "include")

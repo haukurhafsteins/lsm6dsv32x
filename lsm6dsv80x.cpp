@@ -1,13 +1,9 @@
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include "lsm6dsv80x.hpp"
-#include "driver/i2c_master.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "esp_log_buffer.h"
-#include "esp_timer.h"
+#include "rtos/Log.hpp"
+#include "rtos/Spi.hpp"
+#include "rtos/time.hpp"
 #include "vectors.h"
 
 #define TAG "LSM6DSV80X"
@@ -17,7 +13,9 @@
 typedef float_t (*lsm6dsv80x_to_mg_t)(int16_t);
 typedef float_t (*lsm6dsv80x_to_mdps_t)(int16_t);
 
-static spi_device_handle_t dev_handle_LSM6DSV32;
+// Transport is the platform-neutral rtos SPI device (command_bits = 8: the
+// register byte travels in the command phase, the data phase stays clean).
+static rtos::SpiDevice *s_spi = nullptr;
 
 stmdev_ctx_t dev_ctx = {};
 
@@ -239,19 +237,12 @@ inline void sflp2q_continuous(Quaternion<T>& q,
 
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
 {
-    uint8_t tx_buf[1 + len];
-    tx_buf[0] = reg & 0x7F; // Write command
-    memcpy(&tx_buf[1], bufp, len);
-
-    spi_transaction_t t = {};
-    t.length = (1 + len) * 8;
-    t.tx_buffer = tx_buf;
-    t.rx_buffer = NULL;
-
-    esp_err_t err = spi_device_polling_transmit(dev_handle_LSM6DSV32, &t);
-    if (err != ESP_OK)
+    // len == 0 is a command-only frame (the pre-seam code sent exactly the
+    // register byte); both rtos backends emit it as such.
+    const uint8_t *tx = len == 0 ? nullptr : bufp;
+    if (s_spi == nullptr || !s_spi->transfer_cmd(reg & 0x7F, tx, nullptr, len))
     {
-        printf("SPI write error: %s\n", esp_err_to_name(err));
+        RTOS_LOGE(TAG, "SPI write error, reg 0x%02x len %u", reg, (unsigned)len);
         return -1;
     }
     return 0;
@@ -259,32 +250,34 @@ static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, ui
 
 static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
 {
-    uint8_t tx_buf[1 + len];
-    uint8_t rx_buf[1 + len]; // First byte will be dummy
-
-    tx_buf[0] = reg | 0x80;        // Read command
-    memset(&tx_buf[1], 0xFF, len); // Dummy bytes
-
-    spi_transaction_t t = {};
-    t.length = (1 + len) * 8;
-    t.tx_buffer = tx_buf;
-    t.rx_buffer = rx_buf;
-
-    esp_err_t err = spi_device_polling_transmit(dev_handle_LSM6DSV32, &t);
-    if (err != ESP_OK)
+    if (len == 0)
     {
-        printf("SPI read error: %s\n", esp_err_to_name(err));
-        return -1;
+        // Command-only frame, same as the pre-seam single register byte.
+        if (s_spi == nullptr || !s_spi->transfer_cmd(reg | 0x80, nullptr, nullptr, 0))
+        {
+            RTOS_LOGE(TAG, "SPI read error, reg 0x%02x len 0", reg);
+            return -1;
+        }
+        return 0;
     }
 
-    memcpy(bufp, &rx_buf[1], len); // Skip dummy byte
+    // 0xFF dummies on MOSI during the data phase, matching the pre-seam
+    // framing byte for byte (the sensor ignores MOSI while it drives MISO).
+    uint8_t tx_buf[len];
+    memset(tx_buf, 0xFF, len);
+
+    if (s_spi == nullptr || !s_spi->transfer_cmd(reg | 0x80, tx_buf, bufp, len))
+    {
+        RTOS_LOGE(TAG, "SPI read error, reg 0x%02x len %u", reg, (unsigned)len);
+        return -1;
+    }
     return 0;
 }
 
 // Optional (may be required by driver)
 static void platform_delay(uint32_t millisec)
 {
-    vTaskDelay(millisec / portTICK_PERIOD_MS);
+    rtos::time::sleep_for(rtos::time::Millis(millisec));
 }
 
 static void setup_sampling_rate()
@@ -418,7 +411,7 @@ int lsm6dsv80x_fifo_data_available()
     lsm6dsv80x_fifo_status_t fifo_status;
     if (-1 == lsm6dsv80x_fifo_status_get(&dev_ctx, &fifo_status))
     {
-        ESP_LOGE(TAG, "FIFO status read error");
+        RTOS_LOGE(TAG, "FIFO status read error");
         return -1;
     }
     if (fifo_status.fifo_ovr == 1)
@@ -428,7 +421,7 @@ int lsm6dsv80x_fifo_data_available()
         // clean stream instead of draining garbage; the cost is the buffered
         // backlog, bounded by the FIFO depth (~0.5 s at 120 Hz).
         overrun_count++;
-        ESP_LOGE(TAG, "FIFO overrun #%u, clearing FIFO to resync", (unsigned)overrun_count);
+        RTOS_LOGE(TAG, "FIFO overrun #%u, clearing FIFO to resync", (unsigned)overrun_count);
         clear_fifo();
         return 0;
     }
@@ -558,9 +551,9 @@ float lsm6dsv80x_get_timestamp_resolution()
     return 1.0f / clk_hz;
 }
 
-void lsm6dsv80x_init_spi(spi_device_handle_t *dev_handle)
+void lsm6dsv80x_init_spi(rtos::SpiDevice *device)
 {
-    dev_handle_LSM6DSV32 = *dev_handle;
+    s_spi = device;
 }
 
 void lsm6dsv80x_start_sampling(bool start)
@@ -579,7 +572,7 @@ void lsm6dsv80x_start_sampling(bool start)
         lsm6dsv80x_odr_cal_reg_get(&dev_ctx, &freq_fine);
         float tactual = lsm6dsv80x_get_timestamp_resolution();
         float odractual = 7680.0 * (1 + 0.0013 * (float)freq_fine) / sampling_rate_to_odrcoeff(cfg.sampleRate);
-        ESP_LOGI(TAG, "LSM6DSV80X started, sample rate: %d, acc range: %d, gyro range: %d timestamp res %fs, odr actual %fHz", cfg.sampleRate, cfg.accelRange, cfg.gyroRange, tactual, odractual);
+        RTOS_LOGI(TAG, "LSM6DSV80X started, sample rate: %d, acc range: %d, gyro range: %d timestamp res %fs, odr actual %fHz", cfg.sampleRate, cfg.accelRange, cfg.gyroRange, tactual, odractual);
     }
     else
     {
@@ -615,20 +608,20 @@ static void lsm6dsv80x_reset()
     lsm6dsv80x_reset_t rst;
 
     if (-1 == lsm6dsv80x_reset_set(&dev_ctx, (lsm6dsv80x_reset_t)(LSM6DSV80X_RESTORE_CTRL_REGS | LSM6DSV80X_GLOBAL_RST)))
-        ESP_LOGE(TAG, "LSM6DSV80X reset failed\n");
+        RTOS_LOGE(TAG, "LSM6DSV80X reset failed");
 
     int rst_cnt = 0;
     const int sleep_time = 5000;
     int total_sleep_time = 0;
     do
     {
-        usleep(sleep_time);
+        rtos::time::sleep_for(rtos::time::Millis(sleep_time / 1000));
         lsm6dsv80x_reset_get(&dev_ctx, &rst);
         rst_cnt++;
         total_sleep_time += sleep_time;
     } while (rst != LSM6DSV80X_READY && total_sleep_time < 1000000);
     if (rst != LSM6DSV80X_READY)
-        ESP_LOGE(TAG, "LSM6DSV80X reset failed\n");
+        RTOS_LOGE(TAG, "LSM6DSV80X reset failed");
 }
 
 void lsm6dsv80x_config(lsm6dsv80x_cfg_t *newCfg)
@@ -664,11 +657,11 @@ void lsm6dsv80x_init()
     dev_ctx.write_reg = platform_write;
     dev_ctx.read_reg = platform_read;
     dev_ctx.mdelay = platform_delay;
-    dev_ctx.handle = &dev_handle_LSM6DSV32;
+    dev_ctx.handle = s_spi;
     uint8_t whoamI = 0;
     if (-1 == lsm6dsv80x_device_id_get(&dev_ctx, &whoamI))
-        ESP_LOGE(TAG, "Who am I get failed\n");
+        RTOS_LOGE(TAG, "Who am I get failed");
 
     if (whoamI != 0x73)
-        ESP_LOGE(TAG, "Who am I doesn't match\n");
+        RTOS_LOGE(TAG, "Who am I doesn't match");
 }

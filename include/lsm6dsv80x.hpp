@@ -1,8 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
-#include "driver/i2c_master.h"
-#include "driver/spi_master.h"
+#include "rtos/Spi.hpp"
 #include "vectors.h"
 #include "Quaternion.hpp"
 #include "lsm6dsv80x_reg.h"
@@ -35,7 +34,9 @@ typedef struct {
     float timestamp;
 } fifo_element_t;
 
-void lsm6dsv80x_init_spi(spi_device_handle_t *dev_handle);
+// The device must be initialized with command_bits = 8 (the register byte
+// travels in the SPI command phase) before sampling starts.
+void lsm6dsv80x_init_spi(rtos::SpiDevice *device);
 void lsm6dsv80x_init();
 void lsm6dsv80x_config(lsm6dsv80x_cfg_t *cfg);
 void lsm6dsv80x_start_sampling(bool start);
