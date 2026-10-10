@@ -308,6 +308,11 @@ static void setup_fifo()
     lsm6dsv80x_fifo_xl_batch_set(&dev_ctx, batch);
     lsm6dsv80x_fifo_gy_batch_set(&dev_ctx, (lsm6dsv80x_fifo_gy_batch_t)batch);
     lsm6dsv80x_fifo_timestamp_batch_set(&dev_ctx, LSM6DSV80X_TMSTMP_DEC_1);
+    // Diagnostic die temperature: consumers must remove these words before
+    // motion packet assembly. Reapply after every reset/configuration; FIFO
+    // bypass/stream transitions retain this register setting.
+    if (lsm6dsv80x_fifo_temp_batch_set(&dev_ctx, LSM6DSV80X_TEMP_BATCHED_AT_1Hz875) != 0)
+        RTOS_LOGE(TAG, "FIFO temperature batching setup failed");
     lsm6dsv80x_fifo_sflp_raw_t fifo_sflp = {};
     fifo_sflp.game_rotation = 1;
     fifo_sflp.gravity = 1;
