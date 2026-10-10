@@ -47,10 +47,14 @@ int32_t writeRegister(void *, uint8_t address, const uint8_t *bytes, uint16_t le
         length == 1 && (bytes[0] & 0x30) != 0)
         return -1;
     std::memcpy(registers.data() + address, bytes, length);
+    // The hardware clears reset bits after restoring control registers.
+    if (address == LSM6DSV80X_FUNC_CFG_ACCESS && length == 1 &&
+        (bytes[0] & 0x04) != 0)
+        registers.fill(0);
     return 0;
 }
 
-void checkFifo()
+void checkFifo(bool temperatureEnabled = true)
 {
     lsm6dsv80x_fifo_temp_batch_t temperature;
     lsm6dsv80x_fifo_xl_batch_t accel;
@@ -60,8 +64,9 @@ void checkFifo()
     uint8_t watermark;
     require(lsm6dsv80x_fifo_temp_batch_get(&dev_ctx, &temperature) == 0,
             "temperature batch register read failed");
-    require(temperature == LSM6DSV80X_TEMP_BATCHED_AT_1Hz875,
-            "FIFO temperature must batch at 1.875 Hz after setup/restart");
+    require(temperature == (temperatureEnabled ? LSM6DSV80X_TEMP_BATCHED_AT_1Hz875
+                                              : LSM6DSV80X_TEMP_NOT_BATCHED),
+            "FIFO temperature batching does not match opt-in configuration");
     require(lsm6dsv80x_fifo_xl_batch_get(&dev_ctx, &accel) == 0 &&
             accel == sampling_rate_to_batching(cfg.sampleRate), "accel batching changed");
     require(lsm6dsv80x_fifo_gy_batch_get(&dev_ctx, &gyro) == 0 &&
@@ -79,21 +84,48 @@ int main()
 {
     dev_ctx.read_reg = readRegister;
     dev_ctx.write_reg = writeRegister;
+    setup_fifo();
+    checkFifo(false); // Existing consumers must retain the motion-only FIFO.
+    lsm6dsv80x_cfg_t defaultConstructed;
+    lsm6dsv80x_cfg_t zeroInitialized = {};
+    lsm6dsv80x_cfg_t partialAggregate = {.sampleRate = 120};
+    require(!defaultConstructed.fifoTemperature && !zeroInitialized.fifoTemperature &&
+            !partialAggregate.fifoTemperature, "omitted temperature field must default off");
     // setup_fifo is also called after the wrapper resets/reconfigures the chip.
     for (const uint16_t rate : {60, 120, 240}) {
         registers.fill(0);
         cfg.sampleRate = rate;
-        setup_fifo();
-        checkFifo();
-        lsm6dsv80x_start_sampling(false);
-        lsm6dsv80x_start_sampling(true);
-        checkFifo();
-        clear_fifo(); // overrun recovery must retain temperature configuration
-        checkFifo();
+        for (const bool enabled : {true, false, true}) {
+            auto next = cfg;
+            next.fifoTemperature = enabled;
+            // Exercise explicit disabling even before a hardware reset.
+            cfg = next;
+            setup_fifo();
+            checkFifo(enabled);
+            lsm6dsv80x_config(&next);
+            checkFifo(enabled);
+            lsm6dsv80x_start_sampling(false);
+            lsm6dsv80x_start_sampling(true);
+            checkFifo(enabled);
+            clear_fifo(); // overrun recovery retains the opt-in setting
+            checkFifo(enabled);
+        }
     }
-    require(lsm6dsv80x_from_lsb_to_celsius(0) == 25.0f, "zero offset changed");
-    require(lsm6dsv80x_from_lsb_to_celsius(256) == 26.0f, "positive scale changed");
-    require(lsm6dsv80x_from_lsb_to_celsius(-256) == 24.0f, "signed scale changed");
+    struct ConversionCase { uint8_t low; uint8_t high; float expected; };
+    for (const auto test : std::array<ConversionCase, 7>{{
+        {0x00, 0x00, 25.0f}, {0x00, 0x01, 26.0f}, {0x00, 0xff, 24.0f},
+        {0x80, 0x01, 26.5f}, {0x80, 0xfe, 23.5f},
+        {0x00, 0x80, -103.0f}, {0xff, 0x7f, 152.99609375f},
+    }}) {
+        lsm6dsv80x_fifo_out_raw_t word{};
+        word.tag = lsm6dsv80x_fifo_out_raw_t::LSM6DSV80X_TEMPERATURE_TAG;
+        std::memset(word.data, 0xa5, sizeof(word.data));
+        word.data[0] = test.low;
+        word.data[1] = test.high;
+        float celsius = 0.0f;
+        lsm6dsv80x_fifo_process_temperature(word, celsius);
+        require(celsius == test.expected, "temperature bytes must decode signed little-endian");
+    }
     registers.fill(0);
     failTemperatureWrite = true;
     setup_fifo();
