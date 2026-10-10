@@ -14,6 +14,9 @@ typedef struct {
     uint16_t fifoWatermark;
     lsm6dsv80x_fifo_mode_t fifoMode;
     uint32_t timeout;
+    // Opt in only when the FIFO consumer handles temperature tags separately
+    // from motion packets. Omitted fields preserve the motion-only stream.
+    bool fifoTemperature = false;
 } lsm6dsv80x_cfg_t;
 
 typedef struct {
@@ -51,6 +54,7 @@ void lsm6dsv80x_fifo_process_gyro(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<flo
 void lsm6dsv80x_fifo_process_gravity(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<float> &gravity);
 void lsm6dsv80x_fifo_process_sflp_game_rotation(lsm6dsv80x_fifo_out_raw_t &f_data1, lsm6dsv80x_fifo_out_raw_t &f_data2, Quaternion<float> &q);
 void lsm6dsv80x_fifo_process_timestamp(lsm6dsv80x_fifo_out_raw_t &f_data, float &timestamp);
+void lsm6dsv80x_fifo_process_temperature(lsm6dsv80x_fifo_out_raw_t &f_data, float &celsius);
 
 void lsm6dsv80x_read_sources(lsm6dsv80x_sources_t *sources);
 void lsm6dsv80x_sleep();

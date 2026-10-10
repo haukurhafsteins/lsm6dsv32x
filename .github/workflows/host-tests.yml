@@ -1,0 +1,24 @@
+name: host-tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  fifo-temperature:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: haukurhafsteins/rtos
+          ref: cd6776f6965736a31f18ca82ccea3cd1b7418e59
+          path: test-components/rtos
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: haukurhafsteins/vectors
+          ref: 66025cdf5875d52f3efa05ae51e721204a1ca80f
+          path: test-components/vectors
+          persist-credentials: false
+      - run: cmake -S tests -B build-host -DURU_COMPONENTS_DIR="$GITHUB_WORKSPACE/test-components"
+      - run: cmake --build build-host
+      - run: ctest --test-dir build-host --output-on-failure

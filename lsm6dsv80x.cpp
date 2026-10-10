@@ -308,6 +308,12 @@ static void setup_fifo()
     lsm6dsv80x_fifo_xl_batch_set(&dev_ctx, batch);
     lsm6dsv80x_fifo_gy_batch_set(&dev_ctx, (lsm6dsv80x_fifo_gy_batch_t)batch);
     lsm6dsv80x_fifo_timestamp_batch_set(&dev_ctx, LSM6DSV80X_TMSTMP_DEC_1);
+    // Reapply the explicit opt-in after reset/configuration, including OFF
+    // when a consumer disables it. FIFO bypass/stream retains this setting.
+    const auto temperatureBatch = cfg.fifoTemperature
+        ? LSM6DSV80X_TEMP_BATCHED_AT_1Hz875 : LSM6DSV80X_TEMP_NOT_BATCHED;
+    if (lsm6dsv80x_fifo_temp_batch_set(&dev_ctx, temperatureBatch) != 0)
+        RTOS_LOGE(TAG, "FIFO temperature batching setup failed");
     lsm6dsv80x_fifo_sflp_raw_t fifo_sflp = {};
     fifo_sflp.game_rotation = 1;
     fifo_sflp.gravity = 1;
@@ -475,6 +481,14 @@ void lsm6dsv80x_fifo_process_gravity(lsm6dsv80x_fifo_out_raw_t &f_data, Vector3<
 
 static inline uint16_t u16_le(const uint8_t* p) {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+void lsm6dsv80x_fifo_process_temperature(lsm6dsv80x_fifo_out_raw_t &f_data,
+                                       float &celsius)
+{
+    // ST OUT_TEMP_L/H: signed little-endian, 256 LSB/C with a 25 C offset.
+    const int16_t raw = static_cast<int16_t>(u16_le(f_data.data));
+    celsius = lsm6dsv80x_from_lsb_to_celsius(raw);
 }
 
 // f_data1 and f_data2 must be the two consecutive 0x13 words for one sample
