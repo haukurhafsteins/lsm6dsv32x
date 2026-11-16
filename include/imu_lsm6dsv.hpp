@@ -15,6 +15,14 @@
 #endif
 namespace imu
 {
+// Encode the selected part into every neutral API symbol and type. A mismatched
+// consumer fails to link, including codec-only consumers that never call init().
+#if IMU_LSM6DSV_PART == 32
+inline namespace part_32
+#else
+inline namespace part_80
+#endif
+{
 inline constexpr std::size_t rotation_word_count = IMU_LSM6DSV_PART == 32 ? 1 : 2;
 inline constexpr uint8_t expected_id = IMU_LSM6DSV_PART == 32 ? 0x70 : 0x73;
 inline constexpr const char *part_name = IMU_LSM6DSV_PART == 32 ? "LSM6DSV32X" : "LSM6DSV80X";
@@ -129,4 +137,5 @@ void process_gyro(const FifoWord &word, Vector3<float> &value);
 void process_gravity(const FifoWord &word, Vector3<float> &value);
 void process_temperature(const FifoWord &word, float &celsius);
 void process_timestamp(const FifoWord &word, float &seconds);
+} // selected part ABI
 } // namespace imu

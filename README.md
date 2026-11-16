@@ -8,7 +8,9 @@ register types. `lsm6dsv80x.hpp` remains a compatibility interface for 80X build
 
 ESP-IDF: set CMake cache variable `IMU_LSM6DSV_PART` to `80` or `32`. The component
 links exactly one register layer and propagates the part define to consumers.
-Invalid values fail configuration. Other build systems compile `lsm6dsv80x.cpp`
+Invalid values fail configuration. The neutral API encodes the part into its
+link symbols using an inline namespace; wrong-part consumers (including default
+80X consumers linked to 32X) fail to link, without changing `imu::` call sites. Other build systems compile `lsm6dsv80x.cpp`
 (the historical source-list entry point) and **one** of `lsm6dsv80x_reg.c` or
 `lsm6dsv32x_reg.c`; define `IMU_LSM6DSV_PART=32` publicly for a 32X build. Do not
 compile both register layers. The old 80X source list needs no changes.

@@ -44,3 +44,11 @@ target_compile_definitions(neutral_trace PRIVATE NEUTRAL_TRACE=1)
 target_include_directories(neutral_trace PRIVATE ../include .. "${URU_COMPONENTS_DIR}/rtos/include" "${URU_COMPONENTS_DIR}/vectors/include")
 target_compile_options(neutral_trace PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Werror>)
 add_test(NAME neutral_80x_parity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/compare_trace.py $<TARGET_FILE:baseline_trace> $<TARGET_FILE:neutral_trace>)
+# Compile consumer TUs independently: do not inherit the driver's part define.
+foreach(part IN ITEMS 80 32)
+    add_library(link_driver_${part} STATIC ../lsm6dsv80x.cpp ../lsm6dsv${part}x_reg.c)
+    target_compile_definitions(link_driver_${part} PRIVATE IMU_LSM6DSV_PART=${part})
+    target_include_directories(link_driver_${part} PRIVATE .. ../include "${URU_COMPONENTS_DIR}/rtos/include" "${URU_COMPONENTS_DIR}/vectors/include")
+    add_test(NAME part_link_${part} COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/part_link_test.py
+        ${CMAKE_CXX_COMPILER} ${part} $<TARGET_FILE:link_driver_${part}> ${URU_COMPONENTS_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../include "${CMAKE_CXX_FLAGS}" "${CMAKE_EXE_LINKER_FLAGS}")
+endforeach()

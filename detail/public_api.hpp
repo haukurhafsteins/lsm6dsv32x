@@ -12,6 +12,14 @@ reg::fifo_out_raw_t native_word(const imu::FifoWord &word)
 } // namespace
 namespace imu
 {
+// Encode the selected part into every neutral API symbol and type. A mismatched
+// consumer fails to link, including codec-only consumers that never call init().
+#if IMU_LSM6DSV_PART == 32
+inline namespace part_32
+#else
+inline namespace part_80
+#endif
+{
 void init_spi(rtos::SpiDevice *device) { impl_init_spi(device); }
 InitStatus init() { return impl_init(); }
 InitStatus readiness() { return status; }
@@ -147,4 +155,5 @@ DecodeResult RotationDecoder::decode(const FifoWord *words, std::size_t count, Q
     q = next;
     return DecodeResult::Ready;
 }
+} // selected part ABI
 } // namespace imu

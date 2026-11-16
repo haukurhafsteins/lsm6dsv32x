@@ -4,6 +4,13 @@ Baseline: upstream `5990d5b7f7bbee2d7a858066c0e141ae72aeb364`.
 No historic 32X wrapper was restored. The common implementation was extracted
 from that 80X baseline, then mapped to a pinned official 32X register layer.
 
+
+Vendored 32X source: [STMicroelectronics/lsm6dsv32x-pid](https://github.com/STMicroelectronics/lsm6dsv32x-pid),
+exact commit [`dc7c1beb037dc5c61479def488084e10e8704023`](https://github.com/STMicroelectronics/lsm6dsv32x-pid/tree/dc7c1beb037dc5c61479def488084e10e8704023).
+Both register files are byte-for-byte copies from that commit. `LICENSE-ST-32X`
+is the unchanged BSD-3-Clause `LICENSE` file from the same commit. Its release
+notes identify V4.2.0 (2026-10-08); the immutable commit is the source pin.
+
 ## Post-August-2025 change audit
 
 | Commits | Disposition |
@@ -52,7 +59,7 @@ and bounded polling retain their healthy-path transaction order.
   temperature rejection and one-word versus two-word arity.
 - CMake tests exercise the actual component selection and public define; a linked
   symbol check rejects the other part's ST implementation in each executable.
-- All 11 CTest checks pass locally, both normally and under UBSan. Authored public-path C++ compiles with
+- All 13 CTest checks pass locally, both normally and under UBSan. Authored public-path C++ compiles with
   `-Wall -Wextra -Werror`. The frozen baseline retains its pre-existing format
   warning; the original temperature fixture deliberately tests partial aggregates.
 
@@ -66,3 +73,14 @@ Vendored 32X SHA-256:
 
 - `lsm6dsv32x_reg.c`: `db53081c4cc61622d0f1a7fc5b457dd77b85369ba77e9ea41d287e4ffd26e0de`
 - `lsm6dsv32x_reg.h`: `00cf8d4e0b6ba43819e58544f0fe831d7ca7455edb7d257b856889a1a791ff59`
+
+## PR #6 review follow-up
+
+The neutral API uses inline namespaces `imu::part_80` / `imu::part_32` internally,
+while callers still write `imu::init()` and `imu::RotationDecoder`. This encodes
+the selected part into every callable symbol and type, rather than relying on
+all callers remembering one guard function. The driver defines only its selected
+part's symbols. Independently compiled wrong-part consumers fail at link time,
+including decoder-only consumers; matching consumers link. An omitted define
+retains the documented default 80X and therefore fails against a 32X driver.
+Tests use optimization and section garbage collection to exercise normal linking.
