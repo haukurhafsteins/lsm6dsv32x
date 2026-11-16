@@ -1,0 +1,16 @@
+# Exercise the component's real selection logic without ESP-IDF/toolchain setup.
+function(idf_component_register)
+    cmake_parse_arguments(component "" "" "SRCS;REQUIRES;INCLUDE_DIRS" ${ARGN})
+    set(expected "lsm6dsv80x.cpp;lsm6dsv${IMU_LSM6DSV_PART}x_reg.c")
+    if(NOT component_SRCS STREQUAL expected)
+        message(FATAL_ERROR "Wrong/multiple selected register implementations: ${component_SRCS}")
+    endif()
+    set(COMPONENT_LIB fixture PARENT_SCOPE)
+endfunction()
+function(target_compile_definitions target visibility definition)
+    if(NOT target STREQUAL "fixture" OR NOT visibility STREQUAL "PUBLIC" OR
+       NOT definition STREQUAL "IMU_LSM6DSV_PART=${IMU_LSM6DSV_PART}")
+        message(FATAL_ERROR "Part selection must propagate to consumers")
+    endif()
+endfunction()
+include("${CMAKE_CURRENT_LIST_DIR}/../CMakeLists.txt")
