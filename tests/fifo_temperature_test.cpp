@@ -82,6 +82,8 @@ void checkFifo(bool temperatureEnabled = true)
 
 int main()
 {
+    // Register-level fixture: lifecycle/identity is covered by contract_test.
+    status = imu::InitStatus::Ready;
     dev_ctx.read_reg = readRegister;
     dev_ctx.write_reg = writeRegister;
     setup_fifo();
@@ -102,7 +104,7 @@ int main()
             cfg = next;
             setup_fifo();
             checkFifo(enabled);
-            lsm6dsv80x_config(&next);
+            impl_config(&next);
             checkFifo(enabled);
             lsm6dsv80x_start_sampling(false);
             lsm6dsv80x_start_sampling(true);
